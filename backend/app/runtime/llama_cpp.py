@@ -1,5 +1,6 @@
 import os
 import asyncio
+import httpx
 from .base import RuntimeAdapter
 
 
@@ -22,6 +23,33 @@ class LlamaCppAdapter(RuntimeAdapter):
             "--alias",
             instance["id"],
         ]
+        if cfg.get("modality") == "image_text":
+            if not model.get("projector_path"):
+                raise ValueError("projector_mismatch: vision projector is required")
+            cmd += [
+                "--image-max-tokens",
+                str(cfg.get("image_max_tokens", 1024)),
+                "--mmproj",
+                model["projector_path"],
+                "--media-path",
+                str(self.settings.storage.media / "images"),
+            ]
+            vision = cfg.get("vision_device_id", "cpu")
+            if vision == "cpu":
+                cmd += ["--no-mmproj-offload"]
+            else:
+                if (
+                    not vision.startswith("local:cuda:")
+                    or not vision.rsplit(":", 1)[1].isdigit()
+                ):
+                    raise ValueError(
+                        "vision_device_invalid: choose CPU or a local CUDA device"
+                    )
+                cmd += [
+                    "--mmproj-offload",
+                    "--mmproj-device",
+                    "CUDA" + vision.rsplit(":", 1)[1],
+                ]
         placement = instance["runtime"].get("placement")
         if placement:
             cmd += [
@@ -100,8 +128,26 @@ class LlamaCppAdapter(RuntimeAdapter):
             response = await self.client.get(
                 instance["runtime"]["endpoint"] + "/health", timeout=2
             )
-            return response.status_code == 200
-        except Exception:
+            if response.status_code != 200:
+                return False
+            if instance["config"].get("modality") == "image_text":
+                props = await self.client.get(
+                    instance["runtime"]["endpoint"] + "/props", timeout=2
+                )
+                if (
+                    props.status_code != 200
+                    or props.json().get("modalities", {}).get("vision") is not True
+                ):
+                    raise ValueError(
+                        "vision_not_loaded: runtime did not confirm image input"
+                    )
+                instance["capabilities"] = {
+                    "image_input": True,
+                    "input_modalities": ["text", "image"],
+                    "output_modalities": ["text"],
+                }
+            return True
+        except httpx.HTTPError:
             return False
 
     async def cleanup_exited(self, instance):

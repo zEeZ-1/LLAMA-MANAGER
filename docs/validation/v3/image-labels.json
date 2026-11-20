@@ -1,0 +1,10 @@
+[
+  {
+    "case": "labels_prefix_question",
+    "answer": "The first image is red. The second image is blue."
+  },
+  {
+    "case": "numbered_prefix_question",
+    "answer": "The colors of the first image are red and blue. The colors of the second image are blue and blue."
+  }
+]

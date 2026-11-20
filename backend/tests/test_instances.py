@@ -124,7 +124,7 @@ def test_startup_timeout_immediate_exit_and_abnormal_exit(client):
 
 def test_deleting_model_keeps_ready_instance_alive(client, cfg):
     record = ready(client, create(client))
-    (cfg.models.directories[0] / "tiny.gguf").unlink()
+    (cfg.models.directories[0] / "tiny" / "tiny.gguf").unlink()
     wait_for(lambda: not client.get("/api/v1/models").json()["models"])
     assert client.get("/api/v1/instances/" + record["id"]).json()["status"] == "ready"
 

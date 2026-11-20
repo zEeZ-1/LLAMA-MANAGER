@@ -1,0 +1,56 @@
+{
+  "budget_bytes": 1073741824,
+  "duration_seconds": 120.0,
+  "passed": true,
+  "peak": {
+    "rss_bytes": 278720512,
+    "uss_bytes": 228728832,
+    "pss_bytes": 238253056,
+    "processes": [
+      {
+        "name": "python",
+        "rss": 55312384,
+        "uss": 41328640,
+        "pss": 44065792,
+        "sample_process": 1
+      },
+      {
+        "name": "ssh",
+        "rss": 4890624,
+        "uss": 331776,
+        "pss": 1519616,
+        "sample_process": 2
+      },
+      {
+        "name": "ssh",
+        "rss": 4849664,
+        "uss": 294912,
+        "pss": 1482752,
+        "sample_process": 3
+      },
+      {
+        "name": "python",
+        "rss": 171118592,
+        "uss": 160620544,
+        "pss": 162239488,
+        "sample_process": 4
+      },
+      {
+        "name": "systemd-run",
+        "rss": 5767168,
+        "uss": 1687552,
+        "pss": 2411520,
+        "sample_process": 5
+      },
+      {
+        "name": "python",
+        "rss": 36782080,
+        "uss": 24465408,
+        "pss": 26533888,
+        "sample_process": 6
+      }
+    ],
+    "excluded_runtime_count": 1
+  },
+  "publication_note": "Environment identifiers removed; resource measurements unchanged."
+}

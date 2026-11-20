@@ -1,3 +1,5 @@
+import type { RequestContent } from "../types";
+import { HttpError } from "./api";
 /** SSE decoder supports CRLF, multi-line data and UTF-8 split across chunks. */
 export class SSEDecoder {
   private buffer = "";
@@ -24,7 +26,7 @@ export class SSEDecoder {
 
 export async function streamChat(
   instanceId: string,
-  messages: { role: string; content: string }[],
+  messages: { role: string; content: RequestContent }[],
   signal: AbortSignal,
   onDelta: (text: string, reasoning: boolean) => void,
 ) {
@@ -39,7 +41,12 @@ export async function streamChat(
   );
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || `请求失败 (${response.status})`);
+    throw new HttpError(
+      response.status,
+      typeof body.detail === "object"
+        ? body.detail.message || JSON.stringify(body.detail)
+        : body.detail || `请求失败 (${response.status})`,
+    );
   }
   if (!response.body) throw new Error("浏览器不支持流式响应");
   const reader = response.body.getReader();

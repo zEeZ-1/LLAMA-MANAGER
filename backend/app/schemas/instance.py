@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CacheType = Literal[
@@ -29,6 +29,11 @@ class Placement(BaseModel):
 
 class InstanceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    variant_id: str | None = Field(None, max_length=100)
+    model_revision: str | None = Field(None, max_length=100)
+    modality: Literal["text", "image_text"] = "text"
+    vision_device_id: str = Field("cpu", max_length=128)
+    image_max_tokens: int = Field(1024, ge=64, le=4096)
     context_size: int = Field(4096, ge=128, le=1048576)
     batch_size: int = Field(512, ge=1, le=8192)
     ubatch_size: int = Field(128, ge=1, le=8192)
@@ -62,10 +67,37 @@ class CreateInstance(BaseModel):
     config: InstanceConfig = Field(default_factory=InstanceConfig)
 
 
+class TextPart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["text"]
+    text: str = Field(max_length=500000)
+
+
+class ImagePart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["image"]
+    image_id: str = Field(pattern=r"^[a-f0-9-]{36}$")
+
+
+ContentPart = Annotated[TextPart | ImagePart, Field(discriminator="type")]
+
+
 class ChatMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
     role: Literal["system", "user", "assistant"]
-    content: str = Field(max_length=500000)
+    content: str | list[ContentPart] = Field(max_length=500000)
+
+    @model_validator(mode="after")
+    def valid_content(self):
+        if isinstance(self.content, list):
+            if not 1 <= len(self.content) <= 32:
+                raise ValueError("Message requires 1 to 32 content parts")
+            images = [p for p in self.content if p.type == "image"]
+            if images and self.role != "user":
+                raise ValueError("Only user messages may include images")
+            if len(images) > 4:
+                raise ValueError("At most four images per message")
+        return self
 
 
 class ChatRequest(BaseModel):

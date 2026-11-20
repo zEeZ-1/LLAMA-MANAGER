@@ -1,0 +1,56 @@
+[
+  {
+    "bytes": 56251,
+    "normalized_bytes": 16914,
+    "dimensions": [
+      2048,
+      2048
+    ],
+    "seconds": 0.8052818879950792
+  },
+  {
+    "bytes": 56253,
+    "normalized_bytes": 16916,
+    "dimensions": [
+      2048,
+      2048
+    ],
+    "seconds": 0.8260022719914559
+  },
+  {
+    "bytes": 56253,
+    "normalized_bytes": 16916,
+    "dimensions": [
+      2048,
+      2048
+    ],
+    "seconds": 0.8034617600060301
+  },
+  {
+    "bytes": 56253,
+    "normalized_bytes": 16916,
+    "dimensions": [
+      2048,
+      2048
+    ],
+    "seconds": 0.798911488003796
+  },
+  {
+    "bytes": 56253,
+    "normalized_bytes": 16916,
+    "dimensions": [
+      2048,
+      2048
+    ],
+    "seconds": 0.7978711360046873
+  },
+  {
+    "bytes": 56253,
+    "normalized_bytes": 16916,
+    "dimensions": [
+      2048,
+      2048
+    ],
+    "seconds": 0.8371509760036133
+  }
+]

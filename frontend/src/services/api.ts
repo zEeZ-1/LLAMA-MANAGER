@@ -1,6 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Instance, Model, Node } from "../types";
 
+export class HttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {
     ...options,
@@ -13,7 +22,8 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     } catch {
       detail = response.statusText;
     }
-    throw new Error(
+    throw new HttpError(
+      response.status,
       typeof detail === "string"
         ? detail
         : detail && typeof detail === "object" && "message" in detail
@@ -37,6 +47,11 @@ export const useModels = () =>
         models: Model[];
         rejected_files: number;
         last_scan: string | null;
+        layout_issues?: {
+          relative_path: string;
+          code: string;
+          message: string;
+        }[];
       }>("/models"),
     refetchInterval: 5000,
   });

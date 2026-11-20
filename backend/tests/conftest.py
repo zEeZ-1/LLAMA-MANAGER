@@ -1,4 +1,3 @@
-import os
 import socket
 import struct
 import sys
@@ -10,15 +9,25 @@ from backend.app.core.config import Settings
 from backend.app.main import create_app
 
 
-def gguf(path: Path, data_bytes=16):
+def gguf(path: Path, data_bytes=16, metadata=None):
     def string(value):
         raw = value.encode()
         return struct.pack("<Q", len(raw)) + raw
 
-    pairs = [("general.name", "Tiny Test"), ("general.architecture", "llama")]
+    pairs = list(
+        (
+            {"general.name": "Tiny Test", "general.architecture": "llama"}
+            | (metadata or {})
+        ).items()
+    )
     content = b"GGUF" + struct.pack("<IQQ", 3, 1, len(pairs))
     for key, value in pairs:
-        content += string(key) + struct.pack("<I", 8) + string(value)
+        if isinstance(value, bool):
+            content += string(key) + struct.pack("<I?", 7, value)
+        elif isinstance(value, int):
+            content += string(key) + struct.pack("<II", 4, value)
+        else:
+            content += string(key) + struct.pack("<I", 8) + string(value)
     content += string("weight") + struct.pack("<IQIQ", 1, 4, 0, 0)
     content += b"\0" * (-len(content) % 32) + b"\0" * data_bytes
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +69,7 @@ def cfg(tmp_path):
             "limits": {"max_request_bytes": 4096, "max_concurrent_chats": 1},
         }
     ).resolve(tmp_path)
-    gguf(settings.models.directories[0] / "tiny.gguf")
+    gguf(settings.models.directories[0] / "tiny" / "tiny.gguf")
     return settings
 
 

@@ -1,0 +1,13 @@
+{
+  "scope": "isolated V3 manager with native CPU vision model; primary manager and real RPCs unaffected",
+  "cleanup_seconds": 0.3020297920011217,
+  "checks": [
+    "SIGKILL removes both native vision process and transient image worker",
+    "restart records interrupted instance without model reload",
+    "orphan image staging removed on restart"
+  ],
+  "manager_observed_before_kill": true,
+  "native_observed_before_kill": true,
+  "image_worker_observed_before_kill": true,
+  "publication_note": "Actual PIDs omitted; lifecycle assertions and measured cleanup latency retained."
+}

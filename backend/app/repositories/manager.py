@@ -5,7 +5,7 @@ from contextlib import closing
 import uuid
 from ..core.errors import ManagerError
 
-TABLES = {"nodes", "workers", "jobs", "credentials"}
+TABLES = {"nodes", "workers", "jobs", "credentials", "model_aliases", "media_assets"}
 
 
 class ManagerStore:
@@ -23,7 +23,7 @@ class ManagerStore:
         def init():
             with closing(self.connect()) as db, db:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
-                if version > 2:
+                if version > 3:
                     raise RuntimeError("Database schema is newer than this manager")
                 if version < 2:
                     backup = self.path.with_suffix(".pre-v2.bak")
@@ -46,6 +46,18 @@ class ManagerStore:
                         ("controller_id", str(uuid.uuid4())),
                     )
                     db.execute("PRAGMA user_version=2")
+                    db.commit()
+                if version < 3:
+                    backup = self.path.with_suffix(".pre-v3.bak")
+                    if self.path.exists() and not backup.exists():
+                        with closing(sqlite3.connect(backup)) as target:
+                            db.backup(target)
+                    db.execute("BEGIN IMMEDIATE")
+                    for table in ("model_aliases", "media_assets"):
+                        db.execute(
+                            f"CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, record TEXT NOT NULL)"
+                        )
+                    db.execute("PRAGMA user_version=3")
                 return db.execute(
                     "SELECT value FROM manager_meta WHERE key='controller_id'"
                 ).fetchone()[0]

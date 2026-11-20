@@ -1,0 +1,7 @@
+{
+  "production_manager": "stopped",
+  "qa_managers": "stopped",
+  "qa_native_processes": [],
+  "real_rpc_state_after": "ready, unclaimed; process identities unchanged",
+  "real_rpc_process_identities_unchanged": true
+}

@@ -1,0 +1,9 @@
+{
+  "repository": "ggml-org/Qwen2-VL-2B-Instruct-GGUF",
+  "revision": "bb307c036e8a1ed7b663bbd0c35b41c4c9294cfd",
+  "files": [
+    "Qwen2-VL-2B-Instruct-Q4_K_M.gguf",
+    "mmproj-Qwen2-VL-2B-Instruct-Q8_0.gguf"
+  ],
+  "license": "apache-2.0"
+}

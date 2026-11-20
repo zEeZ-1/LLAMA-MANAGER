@@ -3,7 +3,8 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, FileResponse
+from typing import Literal
 from .api.remote import install_routes
 from .repositories.manager import ManagerStore
 from .remote.ssh_transport import SshTransport
@@ -26,6 +27,7 @@ from .services.model_catalog import ModelCatalog
 from .services.instance_manager import InstanceManager
 from .services.node_manager import LocalNodeProvider
 from .services.gateway import Gateway
+from .services.media_store import MediaStore
 
 
 def create_app(settings: Settings | None = None):
@@ -35,6 +37,7 @@ def create_app(settings: Settings | None = None):
     async def lifespan(app):
         lock = ManagerLock(cfg.storage.database.with_suffix(".manager.lock"))
         catalog = ModelCatalog(cfg.models)
+        media = None
         manager = None
         remote = jobs = ssh = None
         async with httpx.AsyncClient(
@@ -51,6 +54,10 @@ def create_app(settings: Settings | None = None):
                 await repository.initialize()
                 store = ManagerStore(cfg.storage.database)
                 await store.initialize()
+                catalog.store = store
+                media = MediaStore(cfg, store)
+                await media.initialize()
+                app.state.media = media
                 ssh = SshTransport(cfg)
                 credentials = CredentialStore(cfg, store, ssh)
                 await credentials.initialize()
@@ -80,7 +87,7 @@ def create_app(settings: Settings | None = None):
                     manager,
                     providers,
                 )
-                app.state.gateway = Gateway(cfg, manager, client)
+                app.state.gateway = Gateway(cfg, manager, client, media)
                 yield
             finally:
                 try:
@@ -93,13 +100,19 @@ def create_app(settings: Settings | None = None):
                 finally:
                     if ssh:
                         await ssh.close()
+                    if media:
+                        await media.close()
                     await catalog.close()
                     lock.close()
 
     app = FastAPI(
-        title="llama.cpp Inference Manager", version="0.2.0", lifespan=lifespan
+        title="llama.cpp Inference Manager", version="0.3.0", lifespan=lifespan
     )
-    app.add_middleware(RequestLimits, max_bytes=cfg.limits.max_request_bytes)
+    app.add_middleware(
+        RequestLimits,
+        max_bytes=cfg.limits.max_request_bytes,
+        image_bytes=cfg.images.upload_bytes,
+    )
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "testserver", cfg.server.host],
@@ -122,7 +135,7 @@ def create_app(settings: Settings | None = None):
     async def health():
         return {
             "status": "ok",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "managed_lifecycle": supervised(),
             "ssh_connections": len(app.state.remote.ssh.masters),
             "runtime_available": cfg.runtime.llama_cpp.server_binary.is_file(),
@@ -199,6 +212,7 @@ def create_app(settings: Settings | None = None):
             "models": app.state.catalog.list_models(node_id),
             "last_scan": app.state.catalog.last_scan,
             "rejected_files": len(app.state.catalog.errors),
+            "layout_issues": app.state.catalog.layout_issues,
         }
 
     @app.post("/api/v1/models/refresh", status_code=202)
@@ -209,7 +223,7 @@ def create_app(settings: Settings | None = None):
     @app.get("/api/v1/models/{model_id}")
     async def model(model_id: str):
         try:
-            return app.state.catalog.public(app.state.catalog.get_model(model_id))
+            return app.state.catalog.public(app.state.catalog.get_package(model_id))
         except (ValueError, OSError) as exc:
             raise HTTPException(404, str(exc)) from exc
 
@@ -252,6 +266,31 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/v1/instances/{instance_id}/chat/completions")
     async def completions(instance_id: str, body: ChatRequest, request: Request):
         return await app.state.gateway.forward(instance_id, body, request)
+
+    @app.post("/api/v1/media/images", status_code=201)
+    async def upload_image(
+        request: Request, representation: Literal["original", "normalized"] = "original"
+    ):
+        return await app.state.media.upload(request, representation == "normalized")
+
+    @app.get("/api/v1/media/images/{identifier}")
+    async def image_metadata(identifier: str):
+        return app.state.media.public(app.state.media.get(identifier))
+
+    @app.get("/api/v1/media/images/{identifier}/content")
+    @app.get("/api/v1/media/images/{identifier}/thumbnail")
+    async def image_content(identifier: str, request: Request):
+        thumbnail = request.url.path.endswith("/thumbnail")
+        record = app.state.media.get(identifier)
+        return FileResponse(
+            app.state.media.file(record, thumbnail),
+            media_type="image/jpeg" if thumbnail else record["mime_type"],
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.delete("/api/v1/media/images/{identifier}")
+    async def delete_image(identifier: str):
+        return await app.state.media.delete(identifier)
 
     @app.api_route(
         "/api/{rest:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"]

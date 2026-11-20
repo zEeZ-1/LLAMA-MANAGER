@@ -1,4 +1,4 @@
-# V2 实现架构
+# V3 实现架构
 
 ```mermaid
 flowchart TB
@@ -7,7 +7,7 @@ flowchart TB
     API --> Catalog[Model Catalog]
     API --> Manager[Instance Manager / 状态机]
     API --> Gateway[有界流式 Gateway / httpx]
-    Catalog -->|watchdog + 定期扫描 / 工作线程| GGUF[允许目录中的 GGUF]
+    Catalog -->|watchdog + 定期扫描 / 工作线程| GGUF[独立模型包 / 主权重 / 投影 / 分片]
     Manager --> SQLite[SQLite / WAL]
     Manager --> Adapter[Runtime Adapter]
     Adapter --> Supervisor[asyncio subprocess / 身份核验]
@@ -15,6 +15,9 @@ flowchart TB
     Supervisor --> RuntimeB[llama-server B]
     Gateway --> RuntimeA
     Gateway --> RuntimeB
+    API --> Media[磁盘附件仓库 / SQLite 元数据]
+    Media --> Worker[单个按需图片处理子进程]
+    Gateway -->|受控 file:// / media-path| Media
     API --> Remote[Remote Manager / Job Manager]
     Remote --> SQLite
     Remote --> SSH[有界 OpenSSH / 固定脚本]
@@ -31,13 +34,13 @@ Node、Model、Instance 和 ChatSession 是独立实体。Node provider 和 Runt
 
 配置与运行态分别保存在实例的 `config` 和 `runtime` 中。UUID 标识实例；PID 只是可变运行信息。API 不暴露内部 endpoint、完整命令或绝对模型路径。
 
-管理端不导入任何推理库。GGUF 解析器只读取必要元数据和张量目录，seek 跳过 tokenizer 数组及权重；校验文件长度覆盖所有张量，拒绝不完整文件及分片模型。元数据解析有计数、深度和字符串大小限制。
+管理端不导入任何推理库。GGUF 解析器只读取必要元数据和张量目录，seek 跳过 tokenizer 数组及权重；校验文件长度覆盖所有张量，拒绝不完整文件；V3 在包层核对完整原生分片组，只将首片交给运行时。元数据解析有计数、深度和字符串大小限制。
 
 ## 文件发现
 
 启动即全量观察；连续稳定至少 1 秒后再解析和接纳。watchdog 事件唤醒扫描，忽略解析器自身引起的 open/read 通知；后台每 30 秒兜底扫描。扫描通过 `asyncio.to_thread` 执行并串行化；API 使用完成后的内存快照。正在复制 / 被修改的模型立即退出可用目录。错误按 fingerprint 缓存，文件改变后重试。
 
-fingerprint 由设备号、inode、大小、mtime_ns 和 ctime_ns 构成，不对 GB 级权重全量计算哈希。Model ID 由节点、配置的规范化根路径和相对文件路径生成，文件内容替换不改变 ID；迁移根目录会生成新 ID。所有候选文件 resolve 后必须仍在其允许根目录内。
+fingerprint 由设备号、inode、大小、mtime_ns 和 ctime_ns 构成，不对 GB 级权重全量计算哈希。V3 Model ID 由配置根路径和相对包目录生成，变体与资产有独立 ID。文件内容更新改变 revision，包移动改变 ID；旧文件 ID 通过持久化别名兼容。所有候选文件 resolve 后必须仍在其允许根目录内。
 
 ## 生命周期
 
@@ -57,7 +60,7 @@ SQLite 保存全部历史实例；会话保存在浏览器，摘要和消息分�
 
 ## 当前局限
 
-无账户系统、自动 GPU 调度、Router Mode、模型下载 / 转换、跨机器同步或浏览器多标签协同生成。只接收文本 Chat Completions 子集（system/user/assistant、stream、temperature、top_p、max_tokens、stop）；多模态、工具调用不在 V1 范围。分片 GGUF 需要先在管理平台外合并。Windows 的源码链接可能需要系统开发者模式；可直接配置二进制路径避开链接。
+无账户系统、自动 GPU 调度、Router Mode、模型下载 / 转换、跨机器同步或浏览器多标签协同生成。支持文本与图文 Chat Completions 子集（system/user/assistant、stream、temperature、top_p、max_tokens、stop）；音频、视频、生成图片及工具调用未实现。HF safetensors 仅识别，不运行。Windows 的源码链接可能需要系统开发者模式；可直接配置二进制路径避开链接。
 
 
 ## V2 集中式远端管理
@@ -79,3 +82,13 @@ SshTransport 调用系统 OpenSSH，默认池上限 4、并行命令 2、等待�
 远端 RPC 独立由远端 systemd 管理，管理端退出时保持待命；原生 RPC 检测到数据连接断开后释放该会话资源。SSH 断连本身不等于 RPC 断连，不终止正常推理。后端重启将旧活动实例标为 failed，核对占用，保留历史但不重载模型。突然掉电 / 全链路断网后的限时回收不在本版范围。
 
 `--direct` 只用于隔离测试，不具备上述 SIGKILL 兜底保证。真实多 GPU、目标平台兼容性和具体内存数据以 validation_v2.md 的已验证范围为准。
+
+## V3 图片与模型包
+
+每个扫描根目录的直接子目录是一个包，有界遍历资产并读取 GGUF 头部；变体、原生分片及投影在包内关联。歧义通过 model.json 明确，无法确定的组合禁止启动。实例创建与进程启动前均核对资产修订，加载后通过原生 /props 核验视觉能力。
+
+图片原始二进制流写 staging，由单个按需子进程解码、校正方向、缩放和清除元数据。FastAPI 不导入 Pillow 或视觉推理库。规范图片按 SHA256 存盘，附件 UUID 与文件身份分开；浏览器 IndexedDB 保存规范 Blob，过期后验证恢复，不重新有损压缩。
+
+Chat 仅接收 image_id，网关在完整 SSE 生命周期内固定文件引用，再转为受控 file://。同一请求历史最多 8 张 / 16 MiB，同时仅一路图片推理；JSON 仍限制 2 MiB，只有原始上传路由单独放宽。缓存目录用控制端归属标记与锁保护，过期清理仅操作生成文件且跳过使用中的附件。
+
+投影在控制机 CPU 或显式本机 GPU 运行，语言模型沿用 RPC Placement，远端没有图片管理服务。image_max_tokens 默认 1024，原生推理内存另计。后台崩溃时临时图片处理和 llama-server 同属 cgroup 清理，远端 RPC 待命。V3 内存预算排除浏览器，详细限制与实测见 [设计](development_v3.md) 和 [验证](validation_v3.md)。

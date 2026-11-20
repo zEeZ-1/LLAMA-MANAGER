@@ -67,7 +67,7 @@ function App() {
           </span>
         </a>
         <div className="nav-label">
-          WORKSPACE <span>V2</span>
+          WORKSPACE <span>V3</span>
         </div>
         <nav>
           {nav.map(([key, Icon, label]) => (

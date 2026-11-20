@@ -16,5 +16,6 @@ inference_backends/llama.cpp
 *.tsbuildinfo
 .ruff_cache/
 data/ssh/
+data/media/
 inference_backends/rpc_packages/
 config/rpc_releases.yaml

@@ -1,4 +1,4 @@
-# API（V2 实现，沿用 `/api/v1` 路径）
+# API（V3 实现，沿用 `/api/v1` 路径）
 
 前缀 `/api/v1`。运行后可通过 `/docs` 查看自动生成的 OpenAPI 文档。管理端默认 `127.0.0.1:8000`，前端不访问推理进程端口。
 
@@ -66,6 +66,38 @@ Chat：
 | 502 | 上游连接、状态或响应大小异常 |
 
 上游连接超时 5 秒，读取超时 300 秒；客户端断连后关闭上游请求。当前没有 API key / 账户管理；应只暴露给可信本机访问。
+
+## V3 模型包与图片
+
+`GET /models` 一包一条，新增 kind、availability、revision、variants、projectors、default_variant_id 和 detection；根目录散放文件及无效目录在 layout_issues 中给出原因。包内字段为相对路径，不返回实际文件路径。`gguf` 是文件格式，`image_text` 是输入类型；`candidate` 不代表已经加载验证。已有明确别名的旧模型 ID 可解析到指定包内变体。
+
+创建 config 新增 `variant_id`、`model_revision`、`modality:"text"|"image_text"`、`vision_device_id:"cpu"|"local:cuda:0"`。单个合法变体可省略 variant_id；多个未指定默认的变体必须选择。旧请求默认 text，避免目录新增投影后意外增加加载。图文模式需要兼容投影；实际 `/props` 核验成功后 Instance.capabilities.image_input 才为 true。
+
+图文实例还可配置 `image_max_tokens`，默认 1024，允许 64～4096；启动时显式传给原生动态分辨率控制。提高该值可能增加视觉计算缓冲和上下文占用。本机 GPU 视觉编码用于 RPC 模式时，当前要求该设备也在显式 Placement 中，未选择的设备不会被隐式加入。
+
+| 方法 | 路径 | 行为 |
+| --- | --- | --- |
+| POST | `/media/images` | 原始二进制上传，最多 8 MiB；201 返回图片 ID、SHA256、实际尺寸、类型和下载引用 |
+| POST | `/media/images?representation=normalized` | 恢复浏览器保存的规范图片；仍完整校验，不重新有损编码 |
+| GET | `/media/images/{id}` | 有效图片元数据；暂存过期 410，未知 ID 404 |
+| GET | `/media/images/{id}/content` | 规范图片文件，真实 MIME 和 nosniff |
+| GET | `/media/images/{id}/thumbnail` | JPEG 缩略图 |
+| DELETE | `/media/images/{id}` | 幂等删除暂存；推理使用中返回 409；不删除浏览器历史 |
+
+上传示例：`curl --data-binary @sample.png -H 'Content-Type: image/png' http://127.0.0.1:8000/api/v1/media/images`。该路由单独限制上传流量，其他 JSON 请求仍保持原上限；客户端 MIME 不替代真实图片格式和像素检查。
+
+图片请求仍发送到 `/instances/{id}/chat/completions`，保留字符串 content，或使用：
+
+```json
+{"messages":[{"role":"user","content":[
+  {"type":"text","text":"描述这张图片"},
+  {"type":"image","image_id":"上传得到的 UUID"}
+]}],"stream":true}
+```
+
+只有 user 允许 image part，也支持仅图片消息。每条最多 4 张、完整历史最多 8 张 / 16 MiB，重复引用仍按出现次数计数。管理接口不接受任意 image_url、file://、HTTP URL 或 Base64；网关将已核验 ID 转成原生文件引用。图片请求全局最多一路；取消、非流式错误与 SSE 结束都会释放引用，防止回收正在读取的文件。
+
+文件和预处理缓存命中由上传结果 cache_hit 表示；原生 cached prompt token 属于另一层缓存，不等同于通用视觉特征缓存。错误使用结构化 detail；图像格式 / 结构不合法 422、字节超限 413、使用中 / 模态不兼容 409、过期 410、并发队列满 429、暂存空间不足 507。浏览器旧会话恢复与上传失败均应保留可重试原因。
 
 
 ## V2 节点、RPC 与后台任务

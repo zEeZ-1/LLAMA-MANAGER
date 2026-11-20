@@ -57,7 +57,7 @@ SCALAR = {
 }
 
 
-def read_metadata(path: Path) -> dict:
+def read_metadata(path: Path, *, allow_split=False) -> dict:
     size = path.stat().st_size
     with path.open("rb") as f:
         operations = 0
@@ -115,7 +115,7 @@ def read_metadata(path: Path) -> dict:
         for _ in range(pairs):
             key, kind = string(True), read("I")
             keep = bool(
-                len(metadata) < 16
+                len(metadata) < 64
                 and key
                 and (
                     key
@@ -126,7 +126,11 @@ def read_metadata(path: Path) -> dict:
                         "general.quantization_version",
                         "general.alignment",
                         "split.count",
+                        "split.no",
+                        "split.tensors.count",
                     }
+                    or key.startswith("clip.")
+                    or key.endswith(".embedding_length")
                     or key.endswith(".context_length")
                 )
             )
@@ -153,6 +157,7 @@ def read_metadata(path: Path) -> dict:
             raise ValueError(
                 "GGUF tensor data is incomplete (file may still be copying)"
             )
-        if metadata.get("split.count", 1) != 1:
+        if metadata.get("split.count", 1) != 1 and not allow_split:
             raise ValueError("V1 requires a single-file GGUF; merge split shards first")
+        metadata["gguf.tensor_count"] = tensors
         return metadata

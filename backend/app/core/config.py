@@ -35,6 +35,17 @@ class Models(BaseModel):
 class Storage(BaseModel):
     database: Path = Path("data/database/manager.db")
     logs: Path = Path("data/logs")
+    media: Path = Path("data/media")
+
+
+class Images(BaseModel):
+    upload_bytes: int = Field(8 * 1024**2, ge=1024, le=16 * 1024**2)
+    normalized_bytes: int = Field(4 * 1024**2, ge=1024, le=8 * 1024**2)
+    max_pixels: int = Field(16000000, ge=1, le=16000000)
+    max_side: int = Field(8192, ge=1, le=8192)
+    normalized_side: int = Field(2048, ge=64, le=2048)
+    storage_bytes: int = Field(512 * 1024**2, ge=16 * 1024**2)
+    ttl_seconds: float = Field(86400, ge=1)
 
 
 class PortRange(BaseModel):
@@ -123,6 +134,7 @@ class Settings(BaseModel):
     runtime: Runtime = Field(default_factory=Runtime)
     models: Models = Field(default_factory=Models)
     storage: Storage = Field(default_factory=Storage)
+    images: Images = Field(default_factory=Images)
     instances: Instances = Field(default_factory=Instances)
     limits: Limits = Field(default_factory=Limits)
 
@@ -137,8 +149,15 @@ class Settings(BaseModel):
         self.models.directories = list(
             dict.fromkeys(path(p) for p in self.models.directories)
         )
+        for index, model_root in enumerate(self.models.directories):
+            if any(
+                model_root.is_relative_to(other) or other.is_relative_to(model_root)
+                for other in self.models.directories[:index]
+            ):
+                raise ValueError("Model scan roots must not overlap")
         self.storage.database = path(self.storage.database)
         self.storage.logs = path(self.storage.logs)
+        self.storage.media = path(self.storage.media)
         self.ssh.private_directory = path(self.ssh.private_directory)
         self.rpc.deployment_manifest = path(self.rpc.deployment_manifest)
         self.rpc.packages_directory = path(self.rpc.packages_directory)

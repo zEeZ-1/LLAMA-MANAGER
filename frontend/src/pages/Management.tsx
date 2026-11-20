@@ -99,7 +99,7 @@ export function Management() {
   const titles = {
     dashboard: ["工作空间总览", "在一个地方管理模型、计算资源与推理实例。"],
     nodes: ["计算节点", "管理本机与远端 RPC 计算资源。"],
-    models: ["模型目录", "自动发现本地 GGUF 模型，无需手动登记。"],
+    models: ["模型目录", "自动识别独立模型包、文件格式及输入类型。"],
     instances: ["推理实例", "为每个任务创建独立的推理环境。"],
     chat: ["", ""],
   };
@@ -113,7 +113,7 @@ export function Management() {
           <h1>{titles[page][0]}</h1>
           <p className="muted">{titles[page][1]}</p>
         </div>
-        <span className="workspace-tag">V2 · RPC</span>
+        <span className="workspace-tag">V3 · IMAGE / RPC</span>
       </div>
       {error && (
         <div className="error" role="alert">
@@ -283,10 +283,14 @@ export function Management() {
           {!!models.data?.rejected_files && (
             <div className="notice">
               {models.data.rejected_files}{" "}
-              个文件尚不可用：可能正在复制、格式不完整或使用了暂不支持的分片 /
-              张量格式。
+              个模型包尚不可用，请检查包内资产完整性。
             </div>
           )}
+          {models.data?.layout_issues?.map((issue) => (
+            <div className="notice" key={issue.relative_path}>
+              {issue.relative_path}：{issue.message}
+            </div>
+          ))}
           {files.length ? (
             <div className="table-wrap">
               <table>
@@ -323,13 +327,30 @@ export function Management() {
                         </td>
                         <td>
                           {m.architecture || "未知"}
-                          <small>GGUF</small>
+                          <small>
+                            {m.format} ·{" "}
+                            {m.kind === "image_text"
+                              ? "图文"
+                              : m.kind === "text"
+                                ? "文本"
+                                : "未识别"}{" "}
+                            · {m.variants.length} 个变体
+                          </small>
+                          <small>
+                            {m.availability === "available"
+                              ? "可创建"
+                              : m.availability}
+                          </small>
+                          {m.detection.reasons.map((reason) => (
+                            <small key={reason}>{reason}</small>
+                          ))}
                         </td>
                         <td className="mono">{bytes(m.size_bytes)}</td>
                         <td>{m.node_id}</td>
                         <td>
                           <button
                             className="small"
+                            disabled={m.availability !== "available"}
                             onClick={() => openCreate(m.id)}
                           >
                             <Plus size={15} /> 创建实例
@@ -345,7 +366,10 @@ export function Management() {
               <div className="empty panel">
                 <Boxes size={34} />
                 <h3>等待发现模型</h3>
-                <p>将 GGUF 文件放入 models/，复制完成后会自动出现在这里。</p>
+                <p>
+                  在 models/
+                  中为每个模型建立独立文件夹，放入主权重及匹配投影后会自动发现。
+                </p>
               </div>
             )
           )}

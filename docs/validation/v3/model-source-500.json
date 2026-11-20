@@ -1,0 +1,9 @@
+{
+  "repository": "ggml-org/SmolVLM-500M-Instruct-GGUF",
+  "revision": "72e986006ef53e37cdd3f6d4241c90b0f01df376",
+  "files": [
+    "SmolVLM-500M-Instruct-Q8_0.gguf",
+    "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
+  ],
+  "license": "apache-2.0"
+}

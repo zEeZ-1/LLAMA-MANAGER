@@ -21,6 +21,8 @@ for flag in [
     "-np",
     "-t",
     "-ngl",
+    "--mmproj",
+    "--media-path",
 ]:
     parser.add_argument(flag)
 args, _ = parser.parse_known_args()
@@ -34,7 +36,11 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
-        data = b'{"status":"ok"}'
+        data = json.dumps(
+            {"modalities": {"vision": bool(args.mmproj)}}
+            if self.path == "/props"
+            else {"status": "ok"}
+        ).encode()
         self.send_response(503 if args.c == 128 else 200)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -43,6 +49,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         prompt = body["messages"][-1]["content"]
+        if isinstance(prompt, list):
+            from pathlib import Path
+
+            for p in prompt:
+                if p["type"] == "image_url":
+                    assert p["image_url"]["url"].startswith("file://")
+                    assert (Path(args.media_path) / p["image_url"]["url"][7:]).is_file()
+            prompt = next(
+                (p["text"] for p in prompt if p["type"] == "text"), "image-request"
+            )
         if prompt == "delay-headers":
             time.sleep(5)
         if prompt == "upstream-error":

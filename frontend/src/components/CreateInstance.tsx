@@ -35,7 +35,22 @@ export function CreateInstance() {
             models.data?.models.find((m) => m.id === modelId)?.name,
           node_id: nodeId,
           model_id: modelId,
-          config,
+          config: {
+            ...config,
+            variant_id:
+              config.variant_id ||
+              models.data?.models.find((m) => m.id === modelId)
+                ?.default_variant_id,
+            model_revision:
+              config.model_revision ||
+              models.data?.models.find((m) => m.id === modelId)?.revision,
+            modality:
+              config.modality ||
+              (models.data?.models.find((m) => m.id === modelId)?.kind ===
+              "image_text"
+                ? "image_text"
+                : "text"),
+          },
         }),
       }),
     onSuccess: () => {
@@ -44,6 +59,10 @@ export function CreateInstance() {
       closeCreate();
     },
   });
+  const selectedModel = models.data?.models.find((m) => m.id === modelId);
+  const selectedVariant = selectedModel?.variants.find(
+    (v) => v.id === (config.variant_id || selectedModel.default_variant_id),
+  );
   const placement = config.placement || { mode: "local", devices: [] };
   const options = (nodes.data?.nodes || []).flatMap((node) =>
     node.devices.flatMap((device) => {
@@ -147,7 +166,10 @@ export function CreateInstance() {
               >
                 <option value="">选择已发现的 GGUF</option>
                 {models.data?.models
-                  .filter((m) => m.node_id === nodeId)
+                  .filter(
+                    (m) =>
+                      m.node_id === nodeId && m.availability === "available",
+                  )
                   .map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.name}
@@ -156,9 +178,116 @@ export function CreateInstance() {
               </select>
             </label>
           </div>
+          {selectedModel && (
+            <div className="form-grid">
+              <label>
+                模型变体
+                <select
+                  aria-label="模型变体"
+                  required
+                  value={
+                    config.variant_id || selectedModel.default_variant_id || ""
+                  }
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      variant_id: e.target.value,
+                      model_revision: selectedModel.revision,
+                    })
+                  }
+                >
+                  <option value="">选择量化变体</option>
+                  {selectedModel.variants.map((v) => (
+                    <option value={v.id} key={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                输入类型
+                <select
+                  aria-label="输入类型"
+                  value={
+                    config.modality ||
+                    (selectedModel.kind === "image_text"
+                      ? "image_text"
+                      : "text")
+                  }
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      modality: e.target.value as "text" | "image_text",
+                    })
+                  }
+                >
+                  <option value="text">仅文本</option>
+                  {selectedModel.kind === "image_text" && (
+                    <option value="image_text">图片 + 文本</option>
+                  )}
+                </select>
+              </label>
+              {(config.modality ||
+                (selectedModel.kind === "image_text"
+                  ? "image_text"
+                  : "text")) === "image_text" && (
+                <>
+                  <label>
+                    视觉编码设备
+                    <select
+                      aria-label="视觉编码设备"
+                      value={config.vision_device_id || "cpu"}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          vision_device_id: e.target.value,
+                        })
+                      }
+                    >
+                      <option value="cpu">控制机 CPU</option>
+                      {nodes.data?.nodes
+                        .find((n) => n.id === "local")
+                        ?.devices.filter((d) => d.backend === "cuda")
+                        .map((d) => (
+                          <option value={d.id} key={d.id}>
+                            控制机 · {d.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    图片 token 上限
+                    <input
+                      aria-label="图片 token 上限"
+                      type="number"
+                      min={64}
+                      max={4096}
+                      value={config.image_max_tokens ?? 1024}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          image_max_tokens: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  <p className="muted">
+                    投影：
+                    {selectedModel.projectors.find(
+                      (p) => p.id === selectedVariant?.projector_id,
+                    )?.relative_path || "请先选择兼容变体"}
+                    。图片会占用上下文 token；CPU 编码更节省本机 GPU
+                    资源，速度可能较慢。图片 token
+                    上限控制支持动态分辨率模型的视觉开销，默认
+                    1024；提高上限可能增加内存需求。
+                  </p>
+                </>
+              )}
+            </div>
+          )}
           {!models.data?.models.length && (
             <div className="notice">
-              将完整 GGUF 文件放入配置的模型目录后，这里会自动更新。
+              将每个模型放入独立文件夹，主权重和投影放在同一模型包内。
             </div>
           )}
           <label>

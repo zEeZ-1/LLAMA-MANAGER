@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import logging
 import time
 from datetime import datetime, timezone
@@ -7,13 +6,18 @@ from pathlib import Path
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from .gguf import read_metadata
+from .model_packages import detect, files_in, fingerprint, identifier, public_package
 
 log = logging.getLogger(__name__)
 
 
 class ModelCatalog:
-    def __init__(self, settings):
+    def __init__(self, settings, store=None):
         self.settings = settings
+        self.store = store
+        self.aliases = {}
+        self.header_cache = {}
+        self.layout_issues = []
         self.models = {}
         self.observed = {}
         self.errors = {}
@@ -26,6 +30,8 @@ class ModelCatalog:
     async def initialize(self):
         for directory in self.settings.directories:
             directory.mkdir(parents=True, exist_ok=True)
+        if self.store:
+            self.aliases = {r["id"]: r for r in await self.store.all("model_aliases")}
         await self.scan_all()
         loop = asyncio.get_running_loop()
         if self.settings.watch:
@@ -61,60 +67,76 @@ class ModelCatalog:
 
     def _scan(self):
         now = time.monotonic()
-        observed, models, errors = {}, {}, {}
+        observed, models, errors, issues, aliases, header_cache = {}, {}, {}, [], {}, {}
         for root in self.settings.directories:
-            for path in root.rglob("*") if self.settings.recursive else root.glob("*"):
-                if path.suffix.lower() != ".gguf":
+            for directory in sorted(root.iterdir()):
+                if directory.name.startswith("."):
                     continue
+                if not directory.is_dir() or directory.is_symlink():
+                    if directory.suffix.lower() == ".gguf":
+                        issues.append(
+                            {
+                                "relative_path": directory.name,
+                                "code": "legacy_layout",
+                                "message": "请将模型及投影整理到独立模型文件夹",
+                            }
+                        )
+                    continue
+                pid = identifier(f"package:{root}:{directory.relative_to(root)}")
                 try:
-                    resolved = path.resolve(strict=True)
-                    if not resolved.is_relative_to(root) or not resolved.is_file():
+                    paths = files_in(directory)
+                    if not paths:
                         continue
-                    stat = resolved.stat()
-                    if stat.st_size == 0:
-                        continue
-                    key = str(resolved)
-                    fingerprint = f"{stat.st_dev}:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ctime_ns}"
-                    previous = self.observed.get(key)
-                    since = (
-                        previous[1] if previous and previous[0] == fingerprint else now
-                    )
-                    observed[key] = (fingerprint, since)
-                    relative = str(path.relative_to(root))
-                    model_id = hashlib.sha256(
-                        f"local:{root}:{relative}".encode()
-                    ).hexdigest()[:24]
+                    stamps = {str(p.resolve()): fingerprint(p) for p in paths}
+                    revision = identifier(str(sorted(stamps.items())))
+                    previous = self.observed.get(str(directory))
+                    since = previous[1] if previous and previous[0] == revision else now
+                    observed[str(directory)] = (revision, since)
                     if now - since < self.settings.stability_seconds:
                         continue
-                    old = self.models.get(model_id)
-                    if old and old["fingerprint"] == fingerprint:
-                        models[model_id] = old
+                    old = self.models.get(pid)
+                    if old and old["revision"] == revision:
+                        models[pid] = old
+                        for path in paths:
+                            cached = self.header_cache.get(str(path.resolve()))
+                            if cached:
+                                header_cache[str(path.resolve())] = cached
                         continue
-                    if key in self.errors and self.errors[key][0] == fingerprint:
-                        errors[key] = self.errors[key]
-                        continue
-                    metadata = read_metadata(resolved)
-                    models[model_id] = dict(
-                        id=model_id,
-                        name=metadata.get("general.name") or path.stem,
-                        filename=path.name,
-                        path=key,
-                        relative_path=relative,
-                        format="gguf",
-                        size_bytes=stat.st_size,
-                        architecture=metadata.get("general.architecture"),
-                        metadata=metadata,
-                        node_id="local",
-                        modified_at=datetime.fromtimestamp(
-                            stat.st_mtime, timezone.utc
-                        ).isoformat(),
-                        fingerprint=fingerprint,
+                    headers = {}
+                    for path in paths:
+                        if path.suffix.lower() != ".gguf":
+                            continue
+                        key = str(path.resolve())
+                        cached = self.header_cache.get(key)
+                        metadata = (
+                            cached[1]
+                            if cached and cached[0] == stamps[key]
+                            else read_metadata(path, allow_split=True)
+                        )
+                        header_cache[key] = (stamps[key], metadata)
+                        headers[path] = metadata
+                    model = detect(root, directory, paths, revision, headers)
+                    model["_files"] = stamps
+                    model["_directory"] = str(directory)
+                    models[pid] = model
+                    for variant in model["variants"]:
+                        first = Path(variant["path"])
+                        old_id = identifier(f"local:{root}:{first.relative_to(root)}")
+                        aliases[old_id] = dict(
+                            id=old_id, package_id=pid, variant_id=variant["id"]
+                        )
+                except (OSError, ValueError, OverflowError, KeyError, TypeError) as exc:
+                    errors[str(directory)] = ("", str(exc))
+                    issues.append(
+                        {
+                            "relative_path": directory.name,
+                            "code": "model_layout_invalid",
+                            "message": str(exc)[:500],
+                        }
                     )
-                except (OSError, ValueError, OverflowError) as exc:
-                    errors[str(path.resolve())] = (
-                        locals().get("fingerprint", ""),
-                        str(exc),
-                    )
+        self.layout_issues = issues
+        self.header_cache = header_cache
+        self.aliases.update(aliases)
         return observed, models, errors
 
     async def scan_all(self):
@@ -122,6 +144,9 @@ class ModelCatalog:
             self.observed, self.models, self.errors = await asyncio.to_thread(
                 self._scan
             )
+            if self.store:
+                for alias in self.aliases.values():
+                    await self.store.put("model_aliases", alias)
             self.last_scan = datetime.now(timezone.utc).isoformat()
 
     async def _run(self):
@@ -147,22 +172,64 @@ class ModelCatalog:
     def refresh(self):
         self.event.set()
 
-    def get_model(self, model_id):
-        model = self.models.get(model_id)
+    def get_package(self, model_id):
+        alias = self.aliases.get(model_id)
+        model = self.models.get(alias["package_id"] if alias else model_id)
         if not model:
-            raise ValueError("Model is unavailable or still being copied")
-        path = Path(model["path"])
-        resolved = path.resolve(strict=True)
-        if resolved != path or not any(
-            resolved.is_relative_to(root) for root in self.settings.directories
-        ):
-            raise ValueError("Model path is outside configured directories")
-        stat = path.stat()
-        fingerprint = f"{stat.st_dev}:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ctime_ns}"
-        if fingerprint != model["fingerprint"]:
-            self.refresh()
-            raise ValueError("Model changed; wait for catalog refresh")
+            raise ValueError(
+                "Model package is unavailable, incomplete or still being copied"
+            )
         return model
+
+    def get_model(self, model_id, config=None):
+        model = self.get_package(model_id)
+        if model["availability"] != "available":
+            raise ValueError(
+                "Model package cannot be created: "
+                + "; ".join(model["detection"]["reasons"])
+            )
+        if (
+            config
+            and config.model_revision
+            and config.model_revision != model["revision"]
+        ):
+            raise ValueError("model_changed: refresh the selected model package")
+        alias = self.aliases.get(model_id)
+        variant_id = (config.variant_id if config else None) or (
+            alias["variant_id"] if alias else model.get("default_variant_id")
+        )
+        variant = next((v for v in model["variants"] if v["id"] == variant_id), None)
+        if variant is None:
+            raise ValueError("model_selection_required: select a model variant")
+        for key, stamp in model["_files"].items():
+            path = Path(key)
+            if (
+                path.resolve(strict=True) != path
+                or not path.is_relative_to(model["_directory"])
+                or fingerprint(path) != stamp
+            ):
+                self.refresh()
+                raise ValueError("model_changed: wait for catalog refresh")
+        result = {
+            **model,
+            **variant,
+            "id": model["id"],
+            "name": model["name"],
+            "variant_id": variant["id"],
+            "projector_path": None,
+        }
+        if config and config.modality == "image_text":
+            projector = next(
+                (p for p in model["projectors"] if p["id"] == variant["projector_id"]),
+                None,
+            )
+            if not projector:
+                raise ValueError(
+                    "projector_mismatch: model has no unique vision projector"
+                )
+            result["projector_path"] = projector["path"]
+            result["projector_id"] = projector["id"]
+        return result
 
     def list_models(self, node_id=None):
         return [
@@ -173,7 +240,7 @@ class ModelCatalog:
 
     @staticmethod
     def public(model):
-        return {k: v for k, v in model.items() if k not in {"path", "fingerprint"}}
+        return public_package(model)
 
     async def close(self):
         if self.observer:

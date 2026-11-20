@@ -7,13 +7,21 @@ class BodyTooLarge(Exception):
 
 
 class RequestLimits:
-    def __init__(self, app, max_bytes):
+    def __init__(self, app, max_bytes, image_bytes=None):
         self.app, self.max_bytes = app, max_bytes
+        self.image_bytes = image_bytes
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         headers = dict(scope["headers"])
+        limit = (
+            self.image_bytes
+            if self.image_bytes
+            and scope["method"] == "POST"
+            and scope["path"] == "/api/v1/media/images"
+            else self.max_bytes
+        )
         if scope["method"] in {"POST", "PUT", "PATCH", "DELETE"}:
             origin = headers.get(b"origin", b"").decode()
             host = headers.get(b"host", b"").decode()
@@ -26,7 +34,7 @@ class RequestLimits:
             length = int(headers.get(b"content-length", b"0"))
         except ValueError:
             length = self.max_bytes + 1
-        if length > self.max_bytes:
+        if length > limit:
             return await JSONResponse({"detail": "Request body too large"}, 413)(
                 scope, receive, send
             )
@@ -37,12 +45,12 @@ class RequestLimits:
             message = await receive()
             if message["type"] == "http.request":
                 consumed += len(message.get("body", b""))
-                if consumed > self.max_bytes:
+                if consumed > limit:
                     raise BodyTooLarge()
             return message
 
         async def bounded_send(message):
-            if consumed > self.max_bytes and message["type"] == "http.response.start":
+            if consumed > limit and message["type"] == "http.response.start":
                 message["status"] = 413
             await send(message)
 

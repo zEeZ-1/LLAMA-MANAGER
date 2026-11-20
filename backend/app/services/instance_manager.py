@@ -83,7 +83,34 @@ class InstanceManager:
             ):
                 raise HTTPException(409, "Active instance limit reached")
             try:
-                model = self.catalog.get_model(request.model_id)
+                model = self.catalog.get_model(request.model_id, request.config)
+                request.config.variant_id = model["variant_id"]
+                request.config.model_revision = model["revision"]
+                if (
+                    request.config.modality == "image_text"
+                    and request.config.vision_device_id != "cpu"
+                ):
+                    local = await self.nodes["local"].get()
+                    device = next(
+                        (
+                            d
+                            for d in local["devices"]
+                            if d["id"] == request.config.vision_device_id
+                            and d["backend"] == "cuda"
+                        ),
+                        None,
+                    )
+                    if not device:
+                        raise ValueError(
+                            "vision_device_invalid: local GPU is unavailable"
+                        )
+                    if request.config.placement.mode == "rpc" and not any(
+                        d.device_id == device["id"]
+                        for d in request.config.placement.devices
+                    ):
+                        raise ValueError(
+                            "vision_device_invalid: select the local vision GPU in placement"
+                        )
                 if model["node_id"] != request.node_id:
                     raise ValueError("Model does not belong to the selected node")
                 used = {
@@ -113,6 +140,11 @@ class InstanceManager:
                 created_at=utcnow(),
                 started_at=None,
                 stopped_at=None,
+                capabilities={
+                    "image_input": False,
+                    "input_modalities": ["text"],
+                    "output_modalities": ["text"],
+                },
             )
             if request.config.placement.mode == "rpc":
                 if not self.resources:
@@ -144,7 +176,10 @@ class InstanceManager:
                         record["id"], config
                     )
                 # Revalidate the model immediately before launch, after remote preparations.
-                model = self.catalog.get_model(record["model_id"])
+                model = self.catalog.get_model(record["model_id"], config)
+                record["runtime"]["assets"] = {
+                    k: model.get(k) for k in ("variant_id", "revision", "projector_id")
+                }
                 identity = await adapter.start(record, model)
                 record["runtime"].update(identity)
                 await self.repository.save(record)

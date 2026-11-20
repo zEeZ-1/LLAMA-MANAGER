@@ -1,0 +1,27 @@
+{
+  "publication_note": "Only connection and readiness results published; addresses and process identities omitted.",
+  "nodes": [
+    {
+      "node": "node-1",
+      "connection_state": "online",
+      "workers": [
+        {
+          "state": "ready",
+          "client_count": 0,
+          "process_identity_verified": true
+        }
+      ]
+    },
+    {
+      "node": "node-2",
+      "connection_state": "online",
+      "workers": [
+        {
+          "state": "ready",
+          "client_count": 0,
+          "process_identity_verified": true
+        }
+      ]
+    }
+  ]
+}

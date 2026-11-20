@@ -1,0 +1,22 @@
+{
+  "checks": [
+    "package detection and UI creation load real vision projector and confirm capabilities",
+    "browser binary upload and controlled file reference produce visually correct native red answer",
+    "multiple images, ordered comparison, IndexedDB Blob persistence and on-demand full preview",
+    "lost server image cache restored from IndexedDB without changing normalized bytes; multi-turn image history understood",
+    "desktop and 390px mobile layout; no page errors",
+    "image-only user message accepted by real browser and native vision runtime",
+    "stopping generation and refreshing preserves image message history"
+  ],
+  "page_errors": [],
+  "scope": "isolated API + candidate UI + native vision inference",
+  "model": "qwen2vl",
+  "sampling": {
+    "temperature": 0,
+    "max_tokens": 128
+  },
+  "multi_image_answer": "The first image has a red background. The second image has a blue background.",
+  "last_answers": [
+    ""
+  ]
+}

@@ -15,6 +15,15 @@ models:
 storage:
   database: ./data/database/manager.db
   logs: ./data/logs
+  media: ./data/media
+images:
+  upload_bytes: 8388608
+  normalized_bytes: 4194304
+  max_pixels: 16000000
+  max_side: 8192
+  normalized_side: 2048
+  storage_bytes: 536870912
+  ttl_seconds: 86400
 instances:
   host: 127.0.0.1
   port_range: {start: 18000, end: 18999}

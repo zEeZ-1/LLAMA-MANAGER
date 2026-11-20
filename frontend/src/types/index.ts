@@ -70,8 +70,25 @@ export interface Model {
   architecture: string | null;
   node_id: string;
   metadata: Record<string, unknown>;
+  kind: string;
+  availability: string;
+  revision: string;
+  default_variant_id?: string;
+  variants: {
+    id: string;
+    name: string;
+    relative_path: string;
+    projector_id?: string | null;
+  }[];
+  projectors: { id: string; relative_path: string }[];
+  detection: { reasons: string[]; verified: boolean };
 }
 export interface InstanceConfig {
+  variant_id?: string;
+  model_revision?: string;
+  modality?: "text" | "image_text";
+  vision_device_id?: string;
+  image_max_tokens?: number;
   context_size: number;
   batch_size: number;
   ubatch_size: number;
@@ -91,6 +108,11 @@ export type InstanceStatus =
   | "stopped"
   | "failed";
 export interface Instance {
+  capabilities?: {
+    image_input: boolean;
+    input_modalities: string[];
+    output_modalities: string[];
+  };
   id: string;
   name: string;
   node_id: string;
@@ -115,6 +137,7 @@ export interface Instance {
   stopped_at: string | null;
 }
 export interface ChatMessage {
+  attachment_ids?: string[];
   id: string;
   session_id: string;
   role: "system" | "user" | "assistant";
@@ -124,6 +147,22 @@ export interface ChatMessage {
   error?: string;
   reasoning?: string;
 }
+export interface Attachment {
+  id: string;
+  session_id: string;
+  blob: Blob;
+  thumbnail: Blob;
+  server_id: string;
+  sha256: string;
+  size_bytes: number;
+  width: number;
+  height: number;
+  mime_type: string;
+  created_at: number;
+}
+export type RequestContent =
+  | string
+  | ({ type: "text"; text: string } | { type: "image"; image_id: string })[];
 export interface ChatSession {
   id: string;
   title: string;

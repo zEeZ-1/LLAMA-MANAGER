@@ -1,0 +1,42 @@
+{
+  "scope": "isolated native SmolVLM, file/Base64 compatibility comparison only; product path stays file references",
+  "normalized_sha256": "7864b3465e11308c9289dfab6e84ce0a88472edbaef9b0199f8d1fc74b0f7219",
+  "file_timings": {
+    "cache_n": 0,
+    "prompt_n": 153,
+    "prompt_ms": 7870.858,
+    "prompt_per_token_ms": 51.443516339869284,
+    "prompt_per_second": 19.438795617961855,
+    "predicted_n": 7,
+    "predicted_ms": 170.854,
+    "predicted_per_token_ms": 28.47566666666667,
+    "predicted_per_second": 35.117702833998614
+  },
+  "base64_timings": {
+    "cache_n": 152,
+    "prompt_n": 1,
+    "prompt_ms": 26.904,
+    "prompt_per_token_ms": 26.904,
+    "prompt_per_second": 37.16919417187035,
+    "predicted_n": 7,
+    "predicted_ms": 160.366,
+    "predicted_per_token_ms": 26.727666666666668,
+    "predicted_per_second": 37.41441452677001
+  },
+  "different_image_timings": {
+    "cache_n": 16,
+    "prompt_n": 137,
+    "prompt_ms": 7284.966,
+    "prompt_per_token_ms": 53.17493430656935,
+    "prompt_per_second": 18.805853040357363,
+    "predicted_n": 7,
+    "predicted_ms": 162.346,
+    "predicted_per_token_ms": 27.057666666666666,
+    "predicted_per_second": 36.95810183188991
+  },
+  "checks": [
+    "same image has reusable native media identity through file and Base64 inputs",
+    "changing image invalidates the image portion of the cached prefix",
+    "Base64 does not confer a cache advantage"
+  ]
+}
