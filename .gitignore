@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+node_modules/
+frontend/dist/
+config/config.yaml
+models/*
+!models/.gitkeep
+data/database/*
+!data/database/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+inference_backends/llama.cpp
+.env
+*.tsbuildinfo
+.ruff_cache/

@@ -1,0 +1,64 @@
+{
+  "budget_bytes": 1073741824,
+  "duration_seconds": 30.0,
+  "passed": true,
+  "peak": {
+    "rss_bytes": 548028416,
+    "uss_bytes": 187121664,
+    "pss_bytes": 291771392,
+    "processes": [
+      {
+        "pid": 18120,
+        "name": "python",
+        "rss": 60432384,
+        "uss": 48766976,
+        "pss": 51517440
+      },
+      {
+        "pid": 18464,
+        "name": "chrome-headless-shell",
+        "rss": 91258880,
+        "uss": 24432640,
+        "pss": 41894912
+      },
+      {
+        "pid": 18466,
+        "name": "chrome-headless-shell",
+        "rss": 39485440,
+        "uss": 528384,
+        "pss": 10047488
+      },
+      {
+        "pid": 18467,
+        "name": "chrome-headless-shell",
+        "rss": 39485440,
+        "uss": 573440,
+        "pss": 10070016
+      },
+      {
+        "pid": 18488,
+        "name": "chrome-headless-shell",
+        "rss": 67665920,
+        "uss": 11784192,
+        "pss": 24606720
+      },
+      {
+        "pid": 18523,
+        "name": "chrome-headless-shell",
+        "rss": 162168832,
+        "uss": 83767296,
+        "pss": 112183296
+      },
+      {
+        "pid": 18485,
+        "name": "chrome-headless-shell",
+        "rss": 87531520,
+        "uss": 17268736,
+        "pss": 41451520
+      }
+    ],
+    "excluded_runtime_pids": [
+      18541
+    ]
+  }
+}

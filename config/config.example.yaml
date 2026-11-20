@@ -1,0 +1,28 @@
+server:
+  host: 127.0.0.1
+  port: 8000
+runtime:
+  default_backend: llama.cpp
+  llama_cpp:
+    root: ./inference_backends/llama.cpp
+    server_binary: ./inference_backends/llama.cpp/build/bin/llama-server
+models:
+  directories: [./models]
+  recursive: true
+  watch: true
+  scan_interval_seconds: 30
+  stability_seconds: 1
+storage:
+  database: ./data/database/manager.db
+  logs: ./data/logs
+instances:
+  host: 127.0.0.1
+  port_range: {start: 18000, end: 18999}
+  startup_timeout_seconds: 180
+  shutdown_timeout_seconds: 10
+  max_active: 16
+limits:
+  max_request_bytes: 2097152
+  max_concurrent_chats: 8
+  max_response_bytes: 4194304
+  max_log_bytes: 10485760

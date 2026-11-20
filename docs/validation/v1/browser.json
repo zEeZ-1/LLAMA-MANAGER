@@ -1,0 +1,12 @@
+{
+  "checks": [
+    "dashboard and node details",
+    "model refresh, create instance, ready and runtime log",
+    "streaming chat and stop generation",
+    "IndexedDB session persistence after reload",
+    "retain history and select another ready instance",
+    "390px mobile layout",
+    "delete persisted session"
+  ],
+  "page_errors": []
+}
