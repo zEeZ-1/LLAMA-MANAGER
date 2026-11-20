@@ -1,7 +1,8 @@
 # llama.cpp Inference Manager：V2 开发设计文档
 
-- 版本：V2.0 / 设计稿第一版。
+- 版本：V2.0 / 设计稿第二次修订。
 - 日期：2026-11-20（Asia/Shanghai）。
+- 本次修订：管理后端退出 / 崩溃时终止全部受管 llama-server，远端 RPC 保持待命并在确认断连后释放实例资源；断电、断网自动回收延后。
 - 阶段：开发前设计，本文描述待实现行为，不代表 V2 已开发或通过验收。
 - V1 基线：[`1188540`](https://github.com/zEeZ-1/LLAMA-MANAGER/commit/11885402670ad3bf9a6b55f4c9f82f05d6c72081)，已独立提交并推送。
 - 延续 [V1 开发设计](development_v1.md)、[现有架构](architecture.md)及[验收记录](validation_v1.md)。冲突时，V2 新增的多机与节点显示规则以本文为准，单机与 Chat 基础能力继续兼容 V1。
@@ -18,7 +19,7 @@ V2 实现一个控制主机管理多台 RPC 计算节点。远端日常只需插
 
 首次接入提供 SSH 用户名及密钥，或一次性登录密码；后续记住节点与凭据引用，复用密钥连接。涉及首次启用用户服务 linger 的操作需要相应权限，必须检测并明确报告，不能假设普通 SSH 登录天然具有管理员权限。
 
-主机未开机、无网络或 SSH 被禁用时，显示具体原因。远程刷系统、装驱动、改防火墙和 Wake-on-LAN 不属于 V2。
+主机未开机、无网络或 SSH 被禁用时，显示具体原因。远程刷系统、装驱动、改防火墙和 Wake-on-LAN 不属于 V2。控制主机突然掉电、网络分区及全链路断网后的远端限时回收和自动恢复留待后续版本；V2 不增加相关心跳租约、远端 watchdog 或强制清理机制。
 
 ### 1.2 资源目标
 
@@ -37,7 +38,9 @@ V2 实现一个控制主机管理多台 RPC 计算节点。远端日常只需插
 | 静态配置 / 动态状态 | 自动读取，按来源和有效期分别缓存 |
 | 自动部署 RPC | 检测环境，分发匹配的预编译包，校验后安装 |
 | RPC 启动 / 停止 / 日志 | SSH 操作本平台管理的 systemd 用户服务 |
-| 退出 SSH 后继续运行 | 必须保证；部署时核验 user manager 和 linger |
+| 退出 SSH 后继续运行 | RPC 和现有推理不受单纯 SSH 断开影响；核验 user manager 和 linger |
+| 管理后端正常退出 / 崩溃 | 终止全部受管 llama-server；远端 RPC 保持待命，确认断连后释放实例资源 |
+| 管理后端重新启动 | 核对旧实例终止和资源释放状态，不保留或自动重启旧 llama-server |
 | RPC 随开机启动 | 可选，默认关闭；远端开机后仍可从页面手动启动 |
 | 已有 RPC | 检测、导入；显式关联和验证后才允许管理启停 |
 | 多节点单模型实例 | 控制主机运行 llama-server，选定本机 / 远端设备参与 |
@@ -50,6 +53,7 @@ V2 实现一个控制主机管理多台 RPC 计算节点。远端日常只需插
 | Windows / macOS 远端部署 | 不纳入首版验收，保留平台适配接口 |
 | 运行中增减节点 / KV 热迁移 | 不实现，调整参与节点需重建实例 |
 | 多控制端并发管理同一 worker | 不支持 |
+| 突然掉电 / 全链路断网后的限时回收 | 后续版本处理，不作为 V2 功能或验收承诺 |
 
 首轮部署验收以现有 Linux aarch64 / Jetson Orin 为主；Linux x86_64 / CUDA 只有在提供并验证对应包后才能显示为支持。不能把“SSH 可登录”当成“任意平台可自动部署”。
 
@@ -247,7 +251,9 @@ class SshTransport:
 
 ### 6.3 SSH 生命周期
 
-普通 SSH 连接是可关闭的管理通道，不能被用作让 RPC 持续运行的必要保活程序。控制端退出、SSH ControlMaster 到期、页面关闭后，已启动 RPC 继续由 systemd 托管。
+SSH 采用按需建立、短时复用、空闲关闭的方式，不要求永久长连，也不承担让模型持续运行的保活职责。SSH ControlMaster 到期或 SSH 单独断开时，只要管理后端与 RPC 推理链路正常，已加载模型保持运行。关闭网页不会停止推理实例。
+
+远端 RPC 始终由其 systemd 用户服务托管。管理后端正常退出或崩溃时，按第 10.4 节终止全部受管 llama-server；远端 RPC 在检测到其推理连接结束后清理实例资源并继续待命，不随 SSH 连接结束而退出。
 
 连接失败区分网络超时、拒绝连接、认证失败、host key 变化和命令权限不足。后台定时采集失败保留最近快照并标注过期，不把全部字段清零。
 
@@ -417,16 +423,62 @@ RPC 服务的启动、停止、升级与实例预留共享同一事务 / 锁约�
 
 分布式启动超时独立配置，建议默认 900 秒，单机仍可使用 V1 的 180 秒。首次权重传输、链路带宽和缓存状态会影响加载时间，页面展示“准备 worker / 传输与加载 / 等待健康检查”等实际阶段，不伪造精确进度。
 
-### 10.4 失败、销毁与重启恢复
+### 10.4 失败、销毁与管理后端退出
 
-- 销毁实例先拒绝新 Chat，再确认本地 llama-server 退出，然后检查 worker 连接 / 资源释放并解除 claim。RPC 默认继续待命。
-- 启动部分失败时停止本次实例的本地进程，回收本次预留，不停止无关 worker 或外部服务。
-- 单纯 SSH 断开而推理链路仍正常时，不终止实例；节点标记遥测过期 / 管理不可达。
-- RPC 服务重启、设备丢失或推理连接故障时，实例进入 failed 并保存受影响节点，流式请求返回可读错误。
-- 无法确认远端释放时 claim 保持 quarantined。不能只因超时到期就把 worker 分配给另一个实例。
-- 恢复隔离占用需要确认原控制进程和连接已经结束、服务身份匹配，再在锁保护下做空闲协议检查；无法核验时等待人工处理，不强制重启正在运行的服务。
-- 控制端重启先加载所有历史 Instance、claims 和 worker 关联，再开放创建；保留仍存活且身份匹配的本地 llama-server，不重新加载同一模型。
-- 遥测未知不能被恢复逻辑当作进程已消失。未知状态保留占用并展示待核对，避免重复分配。
+本节替代 V1“关闭管理后端后保留 llama-server 并在重启后接管”的进程生命周期策略。所有停止操作只针对本平台登记且身份匹配的实例，不扫描或停止用户在平台外运行的同名进程。
+
+#### 10.4.1 连接与退出处理表
+
+| 情况 | 控制端 llama-server | 远端 RPC 服务 | 模型与会话 |
+| --- | --- | --- | --- |
+| 关闭网页 | 继续运行 | 继续运行 | 模型保持加载；会话历史保留 |
+| SSH 单独断开 / 空闲连接关闭 | 继续运行，前提是 RPC 推理链路正常 | 继续运行 | 不因 SSH 断开卸载模型，遥测可标记过期 |
+| 管理后端正常退出 / 重启 | 全部受管实例终止 | 保持待命 | 远端确认断连后释放模型、KV 等实例资源；不自动重载 |
+| 管理后端崩溃 / 被 SIGKILL | 由 systemd 清理全部受管实例 | 保持待命 | 不依赖管理后端发送 SSH 清理命令；RPC 确认断连后释放实例资源 |
+| 单个实例销毁 / llama-server 崩溃 | 对应实例终止，其他实例不受影响 | 保持待命 | 释放对应连接的实例资源；历史记录与会话保留 |
+| 远端正常重启 | 受影响实例停止或标记失败 | 按已有启动配置恢复，未启用自启则保持停止 | 原内存模型丢失，后续创建实例时重新加载 |
+| 控制主机突然掉电 / 网络彻底中断 | 后续版本定义完整处理策略 | 不承诺限时自动清理或重启 | V2 仅保留最后状态与待核对标记，不承诺掉电后立即释放 |
+
+远端清理连接资源后，RPC 进程、CUDA 基础上下文和部分运行时缓存可能仍有占用；“释放模型”不等于 RPC 进程 RSS 必须归零。RPC 磁盘张量缓存保留，不属于仍然加载的模型；下一次创建实例可利用缓存，但必须重新建立实例和 KV 状态。
+
+#### 10.4.2 崩溃清理必须由操作系统兜底
+
+管理后端崩溃时无法保证执行 finally、lifespan shutdown 或 SSH 命令，因此不能仅用应用退出回调实现“全部 llama-server 终止”。Linux V2 的托管启动入口采用 systemd 用户服务，将管理主进程、其启动的全部 llama-server 及 SSH 管理子进程置于同一所属 cgroup。
+
+关键服务策略如下，具体单元路径在实现阶段确定：
+
+```ini
+[Service]
+Type=exec
+ExitType=main
+KillMode=control-group
+TimeoutStopSec=10
+SendSIGKILL=yes
+Restart=no
+```
+
+管理主进程结束后，systemd 停用该服务并清理剩余所属进程，先终止、超时再强杀。正常退出时应用先停止接收新请求并尽力更新实例记录，操作系统仍负责最后清理。无需新增远端常驻清理程序。
+
+llama-server 不能放进不受该服务退出约束的独立常驻单元或移出所属 cgroup；setsid 不能作为跨管理后端退出保留模型的手段。受支持的 V2 开发启动也应使用相同托管入口；缺少托管能力时明确提示，不能把普通裸 Python 启动宣称为通过 SIGKILL 清理验收。
+
+systemd 管理器自身失效、控制主机掉电或不可中断的驱动故障不属于此清理时限保证。V2 验收覆盖正常停止、应用崩溃、SIGKILL 和可终止 / 需强杀的测试子进程，不承诺远端失联后的固定释放时间。
+
+#### 10.4.3 实例状态与重新启动
+
+- 显式销毁实例：拒绝新 Chat，确认本地 llama-server 退出，检查 worker 连接 / 资源释放后解除 claim。正常完成的记录设为 stopped，RPC 继续待命。
+- 管理后端正常退出：终止全部受管 llama-server，尽力将实例记录写为 stopped；模型不跨管理后端重启保留。
+- 管理后端崩溃：允许数据库暂留 starting / ready 等旧状态；下次启动先根据所属服务、PID / 创建时间和清理结果核对，把已退出的旧活动实例记为 failed，并记录 `manager_terminated`，不能继续显示就绪。
+- 管理后端重新启动只恢复登记、历史和占用核对，不重新接管旧模型，不自动重建或启动旧实例。用户重新创建实例后才再次加载模型。
+- 发现身份匹配的本平台遗留 llama-server 时先完成清理再开放创建；发现身份不匹配的同 PID 或外部进程时不得停止它，应报告身份变化。
+- 历史实例和 IndexedDB 会话不删除；会话保留消息，用户可在新 READY 实例上继续。
+
+#### 10.4.4 其余错误与当前边界
+
+- 启动部分失败时仅停止本次实例并回收本次预留，不停止无关 worker 或外部服务。
+- SSH 单独断开只使管理 / 遥测状态降级；不能把它作为终止仍正常推理实例的条件。
+- 已检测到 RPC 服务退出、设备丢失或明确推理错误时，相关实例标记 failed、释放 HTTP 资源并停止本地对应进程；不自动替换节点或恢复原 KV。
+- 无法确认远端释放时 claim 保持 quarantined，阻止重新分配；管理后端重新启动后通过 SSH 及空闲检查核对。不能只因时间到期就释放占用，也不强制重启未知状态的 worker。
+- 断电、网络分区、静默断网的失联检测期限、自动卸载、远端心跳与重连续跑后续再设计。V2 不修改 RPC 上游源码或整机 TCP 参数以提供此类能力，也不承诺现有原生 RPC 会在这些情况下立即清理。
 
 ## 11. Backend 模块规划
 
@@ -442,7 +494,7 @@ backend/app/
     deployment_service.py      # 包选择、传输、校验、切换和回退
     resource_manager.py        # worker 原子占用及隔离恢复
     job_manager.py             # 有界任务、步骤和重启核对
-    instance_manager.py        # 扩展 placement 生命周期
+    instance_manager.py        # placement 生命周期及管理后端退出收尾
   nodes/
     base.py
     local.py
@@ -538,7 +590,7 @@ data/logs/                                   # 有界管理日志，忽略
 
 创建请求不能提交任意 RPC URL、模型绝对路径、服务名或远端命令。worker endpoint 只能由后端根据登记与验证结果解析。
 
-错误应包含稳定 code 及可读 message，例如：`ssh_unreachable`、`auth_failed`、`host_key_untrusted`、`host_key_changed`、`privilege_required`、`unsupported_platform`、`runtime_missing`、`version_mismatch`、`port_conflict`、`worker_busy`、`resource_quarantined`、`telemetry_permission_denied`。
+错误应包含稳定 code 及可读 message，例如：`ssh_unreachable`、`auth_failed`、`host_key_untrusted`、`host_key_changed`、`privilege_required`、`unsupported_platform`、`runtime_missing`、`version_mismatch`、`port_conflict`、`worker_busy`、`resource_quarantined`、`manager_terminated`、`telemetry_permission_denied`。
 
 不支持或尚未采集的指标属于指标状态，不应让整个 GET nodes 请求返回 500。
 
@@ -590,7 +642,7 @@ jobs:
 
 新增 nodes、rpc_workers、resource_claims、jobs 和 credential_refs 表；为活动 worker 占用建立唯一约束。历史 job 不含认证材料，按数量 / 时间保留有界记录。
 
-V1 Instance JSON 中缺失 placement 时解释为 local，保留 ID、config、状态、PID 和生命周期信息。原有 model_id 和 IndexedDB 会话不重写。V1 已运行的进程按原有身份核验恢复，不因升级强制重启。
+V1 Instance JSON 中缺失 placement 时解释为 local，保留 ID、config、历史 PID 和生命周期信息，原有 model_id 和 IndexedDB 会话不重写。数据兼容不延续 V1 的进程保留策略：切换至 V2 前先正常销毁已有受管实例，不能无提示热接管 V1 的已加载模型。启动时发现历史活动记录按第 10.4 节核对和清理，不自动恢复成 READY 或重新加载。
 
 旧 API 字段至少在过渡期保留，并提供统一新结构。V2 前端消费新的指标语义，不继续调用会把 null 统一渲染成“不可用”的旧格式化方法。
 
@@ -650,9 +702,9 @@ SSH 默认只用于控制；RPC 默认走明确绑定 LAN 地址的直连数据�
 
 ### M5：故障恢复与预算验收
 
-覆盖重启、节点断电、SSH 中断、RPC 崩溃、部署中断、服务身份变化、隔离占用和历史兼容。完成控制端 / 远端分项内存测试和 30 分钟稳定性采样。
+覆盖管理后端正常退出、崩溃、SIGKILL、重新启动、SSH 单独断开、RPC 崩溃、部署中断、服务身份变化、占用核对和历史兼容。完成控制端 / 远端分项内存测试和 30 分钟稳定性采样。控制主机突然掉电、网络分区及全链路断网的自动回收不纳入本版里程碑。
 
-验收：不丢会话，不误停无关进程，不因管理链路丢失误杀仍正常的推理实例；控制层预算通过后才更新 V2 验收报告。
+验收：管理后端退出 / 崩溃后全部受管 llama-server 退出，远端 RPC 确认断连后释放实例资源并保持待命；不丢历史会话，不误停外部进程，不因 SSH 单独断开终止正常推理。控制层预算通过后才更新 V2 验收报告。
 
 ## 16. 必须覆盖的验收场景
 
@@ -676,8 +728,13 @@ SSH 默认只用于控制；RPC 默认走明确绑定 LAN 地址的直连数据�
 | 多机启动 | 本机 + 一个 / 两个远端设备真实推理，设备映射和 split 可核对 |
 | 部分失败 | 启动失败回收本次资源，无法确认释放则隔离，不影响其他实例 |
 | 管理断连 | SSH 断开而 RPC 正常时仅管理状态降级，不终止推理 |
-| 推理故障 | RPC 崩溃 / 节点断电导致相关实例明确失败并释放 HTTP 资源 |
-| 控制端重启 | 恢复旧 PID 与 claims，不重复分配或重载存活实例 |
+| 推理故障 | 已检测到的 RPC 崩溃导致相关实例失败并释放 HTTP 资源 |
+| 管理后端正常退出 | 全部受管 llama-server 结束，记录尽力更新为 stopped；远端 RPC 保持待命 |
+| 管理后端崩溃 / SIGKILL | 不执行应用退出回调也能由 systemd 清理全部所属 llama-server；不误停外部进程 |
+| 停止超时 | 所属测试子进程忽略终止信号时，systemd 超时强杀，无遗留受管进程 |
+| 模型释放 | 正常 RPC 断连后模型 / KV 等连接资源释放，允许基础运行时占用及磁盘缓存保留 |
+| 控制端重新启动 | 核对旧状态和 claims，旧活动实例不恢复 READY，不自动创建或加载模型 |
+| 突然掉电 / 全链路断网 | 后续版本处理，不列入 V2 限时回收验收 |
 | 页面交互 | 节点操作有步骤与错误，停止被占用节点显示关联实例 |
 | 隐私与发布 | 仓库、API 和日志不存在密码、私钥、真实认证配置 |
 | 预算 | 同口径控制端 < 1 GiB；SSH 增量预算与远端 idle / loaded 分别实测 |
@@ -687,7 +744,7 @@ SSH 默认只用于控制；RPC 默认走明确绑定 LAN 地址的直连数据�
 
 ## 17. V2 完成标准与本轮交付
 
-V2 实现完成需同时满足：节点统一信息显示、SSH 自动接入及部署、可控 RPC 生命周期、多设备实例、V1 数据兼容、故障隔离和内存预算。不能只增加远端 IP 表单与 `--rpc` 参数便视为完成。
+V2 实现完成需同时满足：节点统一信息显示、SSH 自动接入及部署、可控 RPC 生命周期、多设备实例、V1 数据兼容、管理后端退出时全部受管 llama-server 清理、故障状态核对和内存预算。不能只增加远端 IP 表单与 `--rpc` 参数便视为完成。
 
 本轮只交付开发设计文档和 V1 仓库基线。本文中的 V2 API、配置、UI 行为、凭据桥接、部署能力和内存目标尚待实现与验证；不在本轮登录远端、安装密钥、启停 RPC 或改变用户已有推理服务。
 
@@ -701,6 +758,7 @@ V2 实现完成需同时满足：节点统一信息显示、SSH 自动接入及�
 - [OpenSSH ssh_config](https://man.openbsd.org/ssh_config)：连接复用、信任文件与空闲保持。
 - [OpenSSH ssh](https://man.openbsd.org/ssh)：认证、远端命令和 SSH_ASKPASS 机制；本地参数数组不能消除远端 shell 解释。
 - [systemd loginctl](https://www.freedesktop.org/software/systemd/man/latest/loginctl.html)：用户管理器与 linger 生命周期。
+- [systemd.kill](https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html) 与 [systemd.service](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html)：受管 cgroup 清理、停止超时、主进程退出和重启策略；本项目需在目标系统版本验收。
 - [NVIDIA Tegrastats 文档](https://docs.nvidia.com/jetson/archives/r36.2/DeveloperGuide/AT/JetsonLinuxDevelopmentTools/TegrastatsUtility.html)：Jetson RAM、GPU 利用率与频率指标；实际采集需适配机器安装的 BSP。
 - [NVIDIA Jetson nvgpu / nvmap 说明](https://github.com/NVIDIA-AI-IOT/jetson-device-skills/blob/main/skills/jetson-diagnostic/references/nvmap-clients.md)：nvgpu 下 nvidia-smi 的指标限制和不同内存统计口径。
 
