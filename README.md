@@ -100,7 +100,7 @@ RPC 数据链路走可信局域网直连，SSH 用于控制。SSH 认证不会�
 
 ## 内存预算
 
-目标：**llama-server 之外的控制端后端、启动包装进程、SSH 子进程 + 单个工作台浏览器合计 RSS 低于 1 GiB**。测量口径和结果见 [V2 验证记录](docs/validation_v2.md)。llama-server 和远端 RPC 的模型、KV cache / GPU 分配另计。
+当前目标（V3）：**llama-server 之外的控制端后端、启动包装进程、SSH 和临时图片处理等辅助进程合计 RSS 低于 1 GiB，浏览器内存不计入**。llama-server 和远端 RPC 的模型、视觉编码器、KV / prompt cache / GPU 分配另计。[V2 验证记录](docs/validation_v2.md) 保留含专用浏览器的历史测量口径；V3 的新预算和图片缓存分层见 [开发设计](docs/development_v3.md)。
 
 控制措施：单 worker、静态前端、共享 HTTP 连接池、默认最多 8 路 Chat、2 MiB 请求上限、4 MiB 响应上限、有界日志尾部及按需加载 Markdown。SSH 默认最多 4 个连接、2 条并行命令、20 个排队任务，空闲 45 秒后回收；静态配置缓存 1 小时，动态采样每 30 秒，失败退避至最多 300 秒。发布包由原生 SFTP 流式传输。默认最多 16 个活动实例；实例本身的推理内存由模型和参数决定。
 
@@ -109,7 +109,7 @@ RPC 数据链路走可信局域网直连，SSH 用于控制。SSH 认证不会�
 .venv/bin/python scripts/check_memory.py --pid <管理后端PID> --browser-pid <专用浏览器PID> --seconds 30
 ```
 
-脚本对独立浏览器的完整进程树和管理后端进程树求 RSS 总和，并自动查找同一受管单元的启动包装进程，排除 `llama-server`，超过预算返回非零。同时报告 USS / PSS。RSS 会重复统计共享页；超大历史、额外浏览器标签和扩展会增加占用。
+脚本默认统计管理后端进程树，并自动查找同一受管单元的启动包装进程，排除 `llama-server`，超过预算返回非零。同时报告 USS / PSS；RSS 会重复统计共享页。V3 后台验收使用不带 `--browser-pid` 的命令；附加浏览器 PID 可复现旧口径或辅助诊断，不作为新后台预算门槛。
 
 ## 开发与验证
 
