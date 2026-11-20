@@ -4,6 +4,8 @@
 
 生产运行只有一个 FastAPI 进程，直接提供 React 静态构建产物；每个实例单独启动一个普通模式 `llama-server`。管理层不加载模型权重，不依赖 PyTorch、Transformers、Redis 或常驻 Node 服务。
 
+当前可运行版本为 V1。下一版的 [V2 开发设计](docs/development_v2.md) 已规划 SSH 集中接入、远端 RPC 自动部署与启停、多机设备分配，以及 Jetson 共享内存和缺失指标的显示修正；这些 V2 功能尚未实现。
+
 ## 快速开始
 
 要求 Python 3.12+、Node.js 22.12+（仅开发 / 构建）和可用的 llama.cpp。
