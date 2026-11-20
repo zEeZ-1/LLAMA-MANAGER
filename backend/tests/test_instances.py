@@ -36,6 +36,7 @@ def test_two_independent_instances_chat_and_idempotent_destroy(client):
         )
         assert "Hello" in response.text and "[DONE]" in response.text
     url = "/api/v1/instances/" + first["id"]
+    assert len(client.get("/api/v1/instances").json()["instances"]) == 2
     assert client.delete(url).json()["status"] == "stopped"
     assert client.delete(url).json()["status"] == "stopped"
     assert not psutil.pid_exists(first["runtime"]["pid"])
@@ -47,6 +48,14 @@ def test_two_independent_instances_chat_and_idempotent_destroy(client):
         == 409
     )
     assert client.get("/api/v1/instances/" + second["id"]).json()["status"] == "ready"
+    remaining = client.get("/api/v1/instances").json()["instances"]
+    assert [r["id"] for r in remaining] == [second["id"]]
+    node = client.get("/api/v1/nodes/local").json()
+    assert node["instance_count"] == node["ready_count"] == 1
+    history = client.get("/api/v1/instances?include_stopped=true").json()["instances"]
+    assert {r["id"] for r in history} == {first["id"], second["id"]}
+    assert client.get(url).json()["status"] == "stopped"
+    assert client.get(url + "/logs").status_code == 200
 
 
 def test_validation_and_no_arbitrary_arguments(client):
@@ -98,6 +107,9 @@ def test_startup_timeout_immediate_exit_and_abnormal_exit(client):
             )
         )
         assert reason in failed["error_message"]
+        assert record["id"] in {
+            r["id"] for r in client.get("/api/v1/instances").json()["instances"]
+        }
         assert (
             client.get("/api/v1/instances/" + record["id"] + "/logs").status_code == 200
         )
@@ -126,6 +138,14 @@ def test_shutdown_stops_instances_restart_does_not_reload_and_refuses_reused_pid
     with TestClient(recovered_app) as http:
         restored = http.get("/api/v1/instances/" + record["id"]).json()
         assert restored["status"] == "stopped"
+        assert http.get("/api/v1/instances").json()["instances"] == []
+        assert http.get("/api/v1/nodes/local").json()["instance_count"] == 0
+        assert [
+            r["id"]
+            for r in http.get("/api/v1/instances?include_stopped=true").json()[
+                "instances"
+            ]
+        ] == [record["id"]]
         assert not psutil.pid_exists(record["runtime"]["pid"])
         assert (
             http.delete("/api/v1/instances/" + record["id"]).json()["status"]

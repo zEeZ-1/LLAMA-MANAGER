@@ -146,9 +146,12 @@ def create_app(settings: Settings | None = None):
         records = [
             r
             for r in app.state.manager.instances.values()
-            if r["node_id"] == node_id
-            or worker_ids.intersection(
-                r["runtime"].get("placement", {}).get("worker_ids", [])
+            if r["status"] != "stopped"
+            and (
+                r["node_id"] == node_id
+                or worker_ids.intersection(
+                    r["runtime"].get("placement", {}).get("worker_ids", [])
+                )
             )
         ]
         node["instance_count"] = len(records)
@@ -211,11 +214,12 @@ def create_app(settings: Settings | None = None):
             raise HTTPException(404, str(exc)) from exc
 
     @app.get("/api/v1/instances")
-    async def instances():
+    async def instances(include_stopped: bool = False):
         return {
             "instances": [
                 app.state.manager.public(r)
                 for r in reversed(app.state.manager.instances.values())
+                if include_stopped or r["status"] != "stopped"
             ]
         }
 

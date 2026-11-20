@@ -10,10 +10,10 @@
 | GET | `/models?node_id=local` | `{models: Model[], last_scan, rejected_files}`，不包含绝对路径 |
 | POST | `/models/refresh` | 202，后台安排扫描，不阻塞 HTTP 等待文件扫描 |
 | GET | `/models/{model_id}` | 单模型公开信息 |
-| GET | `/instances` | `{instances: Instance[]}`，包含停止及失败历史 |
+| GET | `/instances` | `{instances: Instance[]}`，默认排除已销毁 / 已停止记录，保留失败实例供排查；`?include_stopped=true` 可包含历史记录 |
 | POST | `/instances` | 202，创建并启动；模型加载异步进行，轮询状态 |
 | GET | `/instances/{id}` | 配置、状态、运行信息和错误 |
-| DELETE | `/instances/{id}` | 优雅终止，等待退出；幂等，保留 STOPPED 记录 |
+| DELETE | `/instances/{id}` | 优雅终止，等待退出；幂等，保留 STOPPED 历史记录，但不再出现在默认列表和节点实例计数中 |
 | GET | `/instances/{id}/logs` | `{text: string}`，最多最后 32 KiB |
 | POST | `/instances/{id}/chat/completions` | JSON 或 SSE；必须 READY |
 
