@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import re
 import time
 from pathlib import Path
 import psutil
@@ -10,10 +11,42 @@ import psutil
 
 def sample(roots):
     processes = {}
+    roots = list(roots)
+    # The default launcher waits outside the service cgroup. Count that Python
+    # wrapper and systemd-run too; their RSS is part of management overhead.
+    units = set()
     for pid in roots:
-        root = psutil.Process(pid)
-        for proc in [root, *root.children(recursive=True)]:
-            processes[proc.pid] = proc
+        try:
+            units.update(
+                re.findall(
+                    r"llama-manager-[0-9a-f]{12}",
+                    Path(f"/proc/{pid}/cgroup").read_text(),
+                )
+            )
+        except OSError:
+            pass
+    if units:
+        for proc in psutil.process_iter(["cmdline", "uids"]):
+            try:
+                args = proc.info["cmdline"] or []
+                if (
+                    args
+                    and Path(args[0]).name == "systemd-run"
+                    and any("--unit=" + unit in args for unit in units)
+                ):
+                    roots.append(proc.pid)
+                    parent = proc.parent()
+                    if parent and "backend.app" in parent.cmdline():
+                        roots.append(parent.pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    for pid in roots:
+        try:
+            root = psutil.Process(pid)
+            for proc in [root, *root.children(recursive=True)]:
+                processes[proc.pid] = proc
+        except psutil.NoSuchProcess:
+            continue
     included, excluded = [], []
     for proc in processes.values():
         try:

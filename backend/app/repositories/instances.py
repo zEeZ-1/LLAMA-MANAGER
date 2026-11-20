@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 
@@ -14,7 +15,7 @@ class InstanceRepository:
     async def initialize(self):
         def init():
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.path) as db:
+            with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute("PRAGMA journal_mode=WAL")
                 db.execute(
                     "CREATE TABLE IF NOT EXISTS instances (id TEXT PRIMARY KEY, record TEXT NOT NULL)"
@@ -24,7 +25,7 @@ class InstanceRepository:
 
     async def all(self):
         def read():
-            with sqlite3.connect(self.path) as db:
+            with closing(sqlite3.connect(self.path)) as db, db:
                 return [
                     json.loads(r[0])
                     for r in db.execute(
@@ -38,7 +39,7 @@ class InstanceRepository:
         serialized = json.dumps(record, ensure_ascii=False)
 
         def write():
-            with sqlite3.connect(self.path) as db:
+            with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute(
                     "INSERT INTO instances VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
                     (record["id"], serialized),

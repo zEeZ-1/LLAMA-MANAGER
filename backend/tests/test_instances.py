@@ -117,14 +117,16 @@ def test_deleting_model_keeps_ready_instance_alive(client, cfg):
     assert client.get("/api/v1/instances/" + record["id"]).json()["status"] == "ready"
 
 
-def test_restart_recovery_reprobes_and_refuses_reused_pid(cfg):
+def test_shutdown_stops_instances_restart_does_not_reload_and_refuses_reused_pid(cfg):
     app = create_app(cfg)
     with TestClient(app) as http:
         wait_for(lambda: http.get("/api/v1/models").json()["models"])
         record = ready(http, create(http))
     recovered_app = create_app(cfg)
     with TestClient(recovered_app) as http:
-        assert ready(http, record)["runtime"]["pid"] == record["runtime"]["pid"]
+        restored = http.get("/api/v1/instances/" + record["id"]).json()
+        assert restored["status"] == "stopped"
+        assert not psutil.pid_exists(record["runtime"]["pid"])
         assert (
             http.delete("/api/v1/instances/" + record["id"]).json()["status"]
             == "stopped"

@@ -1,3 +1,4 @@
+import { Nodes } from "./Nodes";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -23,6 +24,8 @@ import {
   useInstances,
   useModels,
   useNodes,
+  gpuMemory,
+  percent,
 } from "../services/api";
 import { useUI } from "../services/ui";
 import type { Instance } from "../types";
@@ -95,7 +98,7 @@ export function Management() {
         : nodes.isPending;
   const titles = {
     dashboard: ["工作空间总览", "在一个地方管理模型、计算资源与推理实例。"],
-    nodes: ["计算节点", "查看本机设备与可用资源。"],
+    nodes: ["计算节点", "管理本机与远端 RPC 计算资源。"],
     models: ["模型目录", "自动发现本地 GGUF 模型，无需手动登记。"],
     instances: ["推理实例", "为每个任务创建独立的推理环境。"],
     chat: ["", ""],
@@ -110,7 +113,7 @@ export function Management() {
           <h1>{titles[page][0]}</h1>
           <p className="muted">{titles[page][1]}</p>
         </div>
-        <span className="workspace-tag">V1 · LOCAL</span>
+        <span className="workspace-tag">V2 · RPC</span>
       </div>
       {error && (
         <div className="error" role="alert">
@@ -128,7 +131,8 @@ export function Management() {
               [
                 Network,
                 "在线节点",
-                nodes.data?.nodes.length || 0,
+                nodes.data?.nodes.filter((n) => n.status === "online").length ||
+                  0,
                 "本地计算资源",
               ],
               [Boxes, "已发现模型", files.length, "GGUF 文件"],
@@ -158,7 +162,7 @@ export function Management() {
             <div className="panel">
               <div className="resource-label">
                 <Cpu size={18} /> CPU{" "}
-                <span>{node?.cpu_info.usage_percent.toFixed(1) || "0"}%</span>
+                <span>{node?.cpu_info.usage_percent?.toFixed(1) || "—"}%</span>
               </div>
               <Meter value={node?.cpu_info.usage_percent || 0} />
               <p className="muted">
@@ -170,7 +174,7 @@ export function Management() {
               <div className="resource-label">
                 <MemoryStick size={18} /> 内存{" "}
                 <span>
-                  {node?.memory_info.usage_percent.toFixed(1) || "0"}%
+                  {node?.memory_info.usage_percent?.toFixed(1) || "—"}%
                 </span>
               </div>
               <Meter value={node?.memory_info.usage_percent || 0} />
@@ -233,11 +237,9 @@ export function Management() {
                   <div className="resource-label">
                     <Cpu size={18} />
                     {d.name}
-                    <span>{d.properties.utilization_percent ?? "—"}%</span>
+                    <span>{percent(d.properties.utilization_percent)}</span>
                   </div>
-                  <p className="muted">
-                    可用 {bytes(d.memory_free)} / {bytes(d.memory_total)}
-                  </p>
+                  <p className="muted">{gpuMemory(d)}</p>
                 </div>
               ))
             ) : (
@@ -248,73 +250,7 @@ export function Management() {
           </div>
         </>
       )}
-      {page === "nodes" && node && (
-        <div className="node-card panel">
-          <div className="section-heading">
-            <div className="node-heading">
-              <div className="device-icon">
-                <Network size={30} />
-              </div>
-              <div>
-                <h2>{node.name}</h2>
-                <span className="muted mono">{node.hostname}</span>
-              </div>
-            </div>
-            <span className="badge ready">
-              <span className="dot ready" />
-              在线
-            </span>
-          </div>
-          <div className="node-specs">
-            <div>
-              <span>处理器</span>
-              <strong>{node.cpu_info.name}</strong>
-              <small>{node.cpu_info.logical_count} 逻辑核心</small>
-            </div>
-            <div>
-              <span>系统内存</span>
-              <strong>{bytes(node.memory_info.total)}</strong>
-              <small>{bytes(node.memory_info.available)} 可用</small>
-            </div>
-            <div>
-              <span>模型 / 实例</span>
-              <strong>
-                {node.model_count} / {node.instance_count}
-              </strong>
-              <small>{node.ready_count} 个实例就绪</small>
-            </div>
-          </div>
-          <div className="node-gpus">
-            {node.devices.map((d) => (
-              <div key={d.id}>
-                <Cpu size={18} />
-                <span>{d.name}</span>
-                <span className="muted">{bytes(d.memory_total)}</span>
-              </div>
-            ))}
-          </div>
-          {nodeExpanded && (
-            <dl className="details">
-              <dt>操作系统</dt>
-              <dd>{node.os}</dd>
-              <dt>架构</dt>
-              <dd>{node.architecture}</dd>
-              <dt>CPU 使用率</dt>
-              <dd>{node.cpu_info.usage_percent}%</dd>
-              <dt>内存使用率</dt>
-              <dd>{node.memory_info.usage_percent}%</dd>
-            </dl>
-          )}
-          <div className="card-footer">
-            <button onClick={() => setNodeExpanded(!nodeExpanded)}>
-              {nodeExpanded ? "收起详情" : "查看详情"}
-            </button>
-            <button className="primary" onClick={() => openCreate()}>
-              <Plus size={16} /> 创建实例
-            </button>
-          </div>
-        </div>
-      )}
+      {page === "nodes" && <Nodes />}
       {page === "models" && (
         <>
           <div className="toolbar">

@@ -1,0 +1,37 @@
+{
+  "release": "9214bdb-aarch64-jetson-v2",
+  "unit": "llama-manager-qa-rpc-ccbae96b00f7.service",
+  "hardware_model": "NVIDIA Jetson Orin Nano Engineering Reference Developer Kit Super",
+  "checks": [
+    "real remote installation shell",
+    "systemd user unit started native CUDA0 worker",
+    "original RPC HELLO/device/memory handshake",
+    "running executable SHA256 matched release",
+    "tiny model inference through native RPC0 on real Orin CUDA0; SSE completed; worker accepted a fresh session after model exit",
+    "real unit stopped; immutable reinstall and rollback preserved configuration"
+  ],
+  "protocol": {
+    "protocol_version": "10.0.0",
+    "devices": [
+      {
+        "index": 0,
+        "memory_free": 5020758016,
+        "memory_total": 7912771584
+      }
+    ]
+  },
+  "idle_rss_bytes": 299593728,
+  "gpu_inference": {
+    "model": "stories15M-q4_0.gguf",
+    "stream_done": true,
+    "log_evidence": [
+      "0.00.091.545 I cmn  common_param:   - RPC0    : 127.0.0.5:18662 (7546 MiB, 4661 MiB free)",
+      "0.00.104.774 I llama_prepare_model_devices: using device RPC0 (127.0.0.5:18662) (unknown id) - 4655 MiB free",
+      "0.00.152.573 I load_tensors: offloaded 7/7 layers to GPU",
+      "0.00.152.592 I load_tensors: RPC0[127.0.0.5:18662] model buffer size =    12.56 MiB",
+      "0.00.173.697 I llama_kv_cache: RPC0[127.0.0.5:18662] KV buffer size =     1.69 MiB",
+      "0.00.179.264 I sched_reserve: RPC0[127.0.0.5:18662] compute buffer size =     0.73 MiB",
+      "0.00.717.058 I common_memory_breakdown_print: |   - RPC0 (127.0.0.5:18662) |  7546 = 4467 + (  14 =    12 +       1 +       0) +        3064 |"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "checks": [
+    "SSH-only loss preserves RPC inference",
+    "owned children share manager cgroup",
+    "SIGKILL manager stops all owned llama-server",
+    "RPC services accept a fresh session after old session cleanup",
+    "restart does not reload models",
+    "stale records reconciled and claims released"
+  ],
+  "killed_manager_pid": 57079,
+  "terminated_inference_pids": [
+    57423,
+    59959
+  ],
+  "rpc_standby_pids": [
+    57278,
+    57332
+  ],
+  "restarted_manager_pid": 60046
+}

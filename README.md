@@ -1,14 +1,14 @@
 # llama.cpp Inference Manager
 
-轻量的单机推理工作台，按 [V1 设计](docs/development_v1.md) 实现节点信息、GGUF 自动发现、独立实例管理、流式 Chat 和本地多会话。界面参考 EXO 的深色工作台、节点卡片和双栏对话交互，未引入 EXO 的运行时依赖。
+轻量的 llama.cpp 推理工作台，支持单机和 SSH 集中管理的多机 RPC。包含节点信息、GGUF 自动发现、实例管理、流式 Chat 和本地多会话。界面参考 EXO 的深色工作台、节点卡片和双栏对话交互。
 
 生产运行只有一个 FastAPI 进程，直接提供 React 静态构建产物；每个实例单独启动一个普通模式 `llama-server`。管理层不加载模型权重，不依赖 PyTorch、Transformers、Redis 或常驻 Node 服务。
 
-当前可运行版本为 V1。下一版的 [V2 开发设计](docs/development_v2.md) 已规划 SSH 集中接入、远端 RPC 自动部署与启停、多机设备分配，以及 Jetson 共享内存和缺失指标的显示修正；这些 V2 功能尚未实现。
+V2 已实现密码接入与自动密钥引导、主机指纹确认、远端配置采集、匹配发布包部署、RPC 启停 / 日志 / 缓存，以及按设备顺序和权重创建多机实例。远端无需安装管理 Agent。Jetson 显示共享系统内存，显存指标缺失不会被显示为 GPU 不可用。测试范围和真实硬件联调状态见 [V2 验证记录](docs/validation_v2.md)。
 
 ## 快速开始
 
-要求 Python 3.12+、Node.js 22.12+（仅开发 / 构建）和可用的 llama.cpp。
+要求 Linux、可用的 systemd 用户服务、OpenSSH 客户端（ssh/scp/ssh-keyscan/ssh-keygen）、Python 3.12+、Node.js 22.12+（仅开发 / 构建）和可用的 llama.cpp。默认入口通过 systemd 托管后端及其推理进程，以保证后端崩溃后回收模型进程。
 
 ```bash
 cd /home/nvidia/llama-inference-manager
@@ -44,7 +44,28 @@ CUDA 环境将 `GGML_CUDA` 改成 `ON`。也可以通过 `LIM_LLAMA_SERVER` 指�
 .venv/bin/python -m backend.app
 ```
 
-打开 **http://127.0.0.1:8000**，在模型页面创建实例，等待「就绪」后打开对话。CPU 是默认模式（GPU layers = 0），需要 GPU 时在创建表单调整。每个实例有自己的上下文、端口、日志和状态；加载同一文件的多个实例仍可能重复占用显存。
+打开 **http://127.0.0.1:8000**，在模型页面创建实例，等待「就绪」后打开对话。CPU 是默认模式（GPU layers = 0），需要 GPU 时在创建表单调整。Flash Attention 默认明确关闭，勾选后开启，需要对应模型和设备支持。每个实例有自己的上下文、端口、日志和状态；加载同一文件的多个实例仍可能重复占用显存。
+
+## 多机接入
+
+远端先准备 Linux、SSH 登录账户、支持 CUDA 的驱动 / 运行库、基础系统工具和可用的 systemd 用户服务。首次部署可以在页面授权启用该账户 linger（需要相应管理员权限），使退出 SSH 后用户服务仍可运行。日常使用只需开机联网。
+
+控制端准备固定版本的 RPC 包，生产节点不执行编译：
+
+```bash
+cmake -S inference_backends/llama.cpp -B inference_backends/llama.cpp/build -DGGML_CUDA=ON -DGGML_RPC=ON
+cmake --build inference_backends/llama.cpp/build --target llama-server ggml-rpc-server -j 2
+.venv/bin/python scripts/package_rpc.py --platform jetson
+```
+
+打包脚本生成被 Git 忽略的 `inference_backends/rpc_packages/` 和 `config/rpc_releases.yaml`，包含提交、协议、架构、glibc 与 SHA256 清单。已有同名发布不会被覆盖；更新时指定新的 `--id`。打包机器应与目标环境兼容；x86_64 / 其他 CUDA 平台必须准备并验证自己的包，`--platform linux` 不是通用兼容承诺。不分发系统 CUDA 库。
+
+1. 节点页添加 IP、用户名、SSH 端口和密码；通过可信渠道核对并确认主机指纹。
+2. 首次密码登录会安装本控制端专用公钥，再验证密钥登录。无需提前配置免密；登录和 sudo 密码不保存。密钥存于控制端私有目录，之后可自动管理。
+3. 配置该节点的 RPC 端口和设备，选择匹配发布包并部署。可选“远端开机后自动启动 RPC”，默认关闭。
+4. 创建实例选择“多机 RPC”，选择空闲 worker 的设备，调整顺序及相对权重。模型文件留在控制端，由原生 RPC 传输所需数据；权重比例不等于精确显存或层数保证。
+
+RPC 数据链路走可信局域网直连，SSH 用于控制。SSH 认证不会给原生 RPC 增加加密或鉴权。平台只启停已验证所属的服务；已有外部 RPC 需要明确验证接管，不会为腾出端口自动停止其他服务。
 
 ## 配置
 
@@ -58,29 +79,33 @@ CUDA 环境将 `GGML_CUDA` 改成 `ON`。也可以通过 `LIM_LLAMA_SERVER` 指�
 | `LIM_DATABASE` | SQLite 数据库路径 |
 | `LIM_LOG_DIR` | 实例日志目录 |
 
-完整配置见 [config.example.yaml](config/config.example.yaml)。推理实例强制监听 `127.0.0.1`。管理端默认只监听本机，无账户和远程节点能力；V1 面向可信本机使用。需要局域网访问时应配置管理端监听地址及外部认证代理。
+完整配置见 [config.example.yaml](config/config.example.yaml)。推理实例强制监听 `127.0.0.1`。管理端默认只监听本机，无账户系统；需要局域网访问时配置外部认证和 HTTPS 代理，再调整管理端监听及受信 Host。节点默认允许 RFC1918 IPv4 私网，可用 `nodes.allowed_networks` 缩小范围。
 
 ## 生命周期与会话
 
 - GGUF 经过至少两次稳定观察和张量数据完整性检查后入库；文件监听 + 30 秒定期扫描兜底，扫描 / 解析在工作线程运行。
 - 创建实例后异步等待 `/health`，通过才进入 READY。加载失败、超时和异常退出保留实例及错误，可在详情查看日志。
 - 销毁会先停止接收新推理请求，再终止进程；超时强杀，确认退出后设为 STOPPED。重复销毁幂等，历史记录保留。
-- **当前 V1 行为：关闭管理后端会保留推理进程**。重启时从 SQLite 恢复，核对 PID、进程创建时间和完整启动参数，再重新健康检查。退出前如需释放模型内存，请先销毁实例。**V2 设计改为管理后端退出 / 崩溃时终止全部受管 llama-server，远端 RPC 保持待命并释放实例资源；不会自动重载模型**，详见 [V2 退出策略](docs/development_v2.md#104-失败销毁与管理后端退出)。V2 行为尚未实现。
+- 关闭网页或单独断开 SSH，不终止推理。SSH 连接按需复用，数量和空闲保留时间有上限，推理不依赖 SSH 长连接。
+- **V2 管理后端正常退出或崩溃时，终止全部受管 llama-server**。默认 systemd 托管入口以 cgroup 清理兜底，包括 SIGKILL；远端 RPC 保持待命，在实际检测到 RPC 连接断开后释放该会话资源。驱动 / 分配器可能保留可复用内存，不能用 RSS 是否立即下降判断模型仍在加载。
+- 后端恢复时核对旧记录与资源占用，不自动重载模型。资源释放无法核实时隔离 worker，核对前禁止复用。突然掉电或全链路断网的限时回收留待后续版本。
+- `--direct` 仅用于隔离开发测试，没有后端 SIGKILL 后清理子进程的保证。正式运行使用默认入口；不要用裸 Uvicorn 启动替代它。
+- V1 数据库自动备份到 `.pre-v2.bak` 后升级，保留模型 ID、实例和浏览器会话。升级后旧活动实例不会自动继续运行；切换前先销毁旧实例。
 - Chat 会话和消息存于当前浏览器 IndexedDB；刷新恢复，删除会话同时删除消息，销毁实例不删除会话。原实例不可用时，可选另一个 READY 实例继续。
 - 生成中切换页面会中止请求并保存已有输出。刷新 / 关闭导致未完成的消息会在重开时标记为中断。
 
 ## 内存预算
 
-目标：**llama-server 之外的管理后端 + 单个工作台浏览器的内存低于 1 GiB**。测量口径和结果见 [验收报告](docs/validation_v1.md)。这不是将 llama-server 的模型权重、KV cache 或 GPU 分配计入管理层预算。
+目标：**llama-server 之外的控制端后端、启动包装进程、SSH 子进程 + 单个工作台浏览器合计 RSS 低于 1 GiB**。测量口径和结果见 [V2 验证记录](docs/validation_v2.md)。llama-server 和远端 RPC 的模型、KV cache / GPU 分配另计。
 
-控制措施：单 worker、静态前端、共享 HTTP 连接池、默认最多 8 路 Chat、2 MiB 请求上限、4 MiB 响应上限、64 KiB 级网络读取、元数据定向读取、有界日志尾部及按需加载 Markdown。默认最多 16 个活动实例；实例本身的推理内存由模型和参数决定。
+控制措施：单 worker、静态前端、共享 HTTP 连接池、默认最多 8 路 Chat、2 MiB 请求上限、4 MiB 响应上限、有界日志尾部及按需加载 Markdown。SSH 默认最多 4 个连接、2 条并行命令、20 个排队任务，空闲 45 秒后回收；静态配置缓存 1 小时，动态采样每 30 秒，失败退避至最多 300 秒。发布包由原生 SFTP 流式传输。默认最多 16 个活动实例；实例本身的推理内存由模型和参数决定。
 
 ```bash
 .venv/bin/python scripts/check_memory.py --pid <管理后端PID> --seconds 30
 .venv/bin/python scripts/check_memory.py --pid <管理后端PID> --browser-pid <专用浏览器PID> --seconds 30
 ```
 
-脚本对独立浏览器的完整进程树和管理后端进程树求 RSS 总和，排除 `llama-server`，超过预算返回非零。RSS 会重复统计共享页，是保守口径；同时报告 USS / PSS。超大历史、额外浏览器标签和扩展会增加占用，不能用一次测量承诺任意工作负载都低于预算。
+脚本对独立浏览器的完整进程树和管理后端进程树求 RSS 总和，并自动查找同一受管单元的启动包装进程，排除 `llama-server`，超过预算返回非零。同时报告 USS / PSS。RSS 会重复统计共享页；超大历史、额外浏览器标签和扩展会增加占用。
 
 ## 开发与验证
 
@@ -106,4 +131,6 @@ python3 -m venv /tmp/lim-browser-qa
 
 测试会创建和销毁名为 Browser QA 的实例，验证会话后删除测试会话；应仅对测试环境运行。
 
-更多内容：[架构](docs/architecture.md) · [API](docs/api.md) · [开发说明](docs/development.md)。
+V2 的原生 RPC / SSH / 崩溃联调使用独立 QA 环境，说明见 [验证记录](docs/validation_v2.md)。AsyncSSH、Playwright 只用于模拟 SSH 和浏览器测试，不进入生产依赖。
+
+更多内容：[架构](docs/architecture.md) · [API](docs/api.md) · [开发说明](docs/development.md) · [V2 设计](docs/development_v2.md)。

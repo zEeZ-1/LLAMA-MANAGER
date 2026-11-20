@@ -14,13 +14,16 @@ def utcnow():
 
 
 class InstanceManager:
-    def __init__(self, settings, catalog, repository, adapters, nodes):
+    def __init__(self, settings, catalog, repository, adapters, nodes, resources=None):
+        self.resources = resources
+        self.closing = False
         self.settings, self.catalog, self.repository = settings, catalog, repository
         self.adapters, self.nodes = adapters, nodes
         self.instances = {}
         self.locks = {}
         self.create_lock = asyncio.Lock()
         self.tasks = {}
+        self.start_tasks = {}
         self.ports = PortAllocator(settings.instances)
 
     def get(self, instance_id):
@@ -34,18 +37,19 @@ class InstanceManager:
             self.locks[record["id"]] = asyncio.Lock()
             if record["status"] in ACTIVE:
                 adapter = self.adapters.get(record["runtime_type"])
-                if not adapter or not adapter.get_status(record):
-                    await self._transition(
-                        record,
-                        "failed",
-                        "Previous inference process is absent or its identity changed",
-                    )
-                elif record["status"] == "stopping":
-                    await self.destroy(record["id"])
-                else:
-                    # READY is re-established only after a fresh health probe.
-                    await self._transition(record, "starting")
-                    self._watch(record)
+                if adapter and adapter.get_status(record):
+                    await adapter.stop(record)
+                await self._transition(
+                    record,
+                    "failed",
+                    "manager_terminated: previous manager exited; model is not reloaded",
+                )
+        if self.resources:
+            self.resources.instance_manager = self
+            for instance_id in {
+                c["instance_id"] for c in await self.resources.store.claims()
+            }:
+                await self.resources.release(instance_id)
 
     async def _transition(self, record, status, error=None):
         allowed = {
@@ -69,6 +73,8 @@ class InstanceManager:
 
     async def create(self, request):
         async with self.create_lock:
+            if self.closing:
+                raise HTTPException(503, "Manager is shutting down")
             if request.node_id not in self.nodes:
                 raise HTTPException(404, "Node not found")
             if (
@@ -108,21 +114,55 @@ class InstanceManager:
                 started_at=None,
                 stopped_at=None,
             )
+            if request.config.placement.mode == "rpc":
+                if not self.resources:
+                    raise HTTPException(409, "RPC resource manager is unavailable")
+                await self.resources.reserve(record["id"], request.config)
             self.instances[record["id"]] = record
             self.locks[record["id"]] = asyncio.Lock()
-            await self._transition(record, "starting")
-            # Spawn completes before replying, while loading and health checks continue in background.
-            async with self.locks[record["id"]]:
-                try:
-                    identity = await self.adapters[request.backend].start(record, model)
-                    record["runtime"].update(identity)
-                    await self.repository.save(record)
-                    self._watch(record)
-                except Exception as exc:
-                    if record["runtime"].get("pid"):
-                        await self.adapters[request.backend].stop(record)
-                    await self._transition(record, "failed", str(exc))
+            try:
+                await self._transition(record, "starting")
+            except BaseException:
+                if self.resources:
+                    await self.resources.store.claim_state(record["id"], "released")
+                self.instances.pop(record["id"], None)
+                self.locks.pop(record["id"], None)
+                raise
+            task = asyncio.create_task(self._start(record, request.config))
+            self.start_tasks[record["id"]] = task
+            task.add_done_callback(
+                lambda done: self.start_tasks.pop(record["id"], None)
+            )
             return record
+
+    async def _start(self, record, config):
+        adapter = self.adapters[record["runtime_type"]]
+        async with self.locks[record["id"]]:
+            try:
+                if config.placement.mode == "rpc":
+                    record["runtime"]["placement"] = await self.resources.prepare(
+                        record["id"], config
+                    )
+                # Revalidate the model immediately before launch, after remote preparations.
+                model = self.catalog.get_model(record["model_id"])
+                identity = await adapter.start(record, model)
+                record["runtime"].update(identity)
+                await self.repository.save(record)
+                self._watch(record)
+            except BaseException as exc:
+                if record["runtime"].get("pid") and adapter.get_status(record):
+                    await adapter.stop(record)
+                await self._transition(
+                    record,
+                    "failed",
+                    "startup_cancelled"
+                    if isinstance(exc, asyncio.CancelledError)
+                    else str(exc),
+                )
+                if self.resources:
+                    await self.resources.release(record["id"])
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
 
     def _watch(self, record):
         task = asyncio.create_task(self._monitor(record))
@@ -131,9 +171,10 @@ class InstanceManager:
 
     async def _monitor(self, record):
         adapter = self.adapters[record["runtime_type"]]
-        deadline = (
-            asyncio.get_running_loop().time()
-            + self.settings.instances.startup_timeout_seconds
+        deadline = asyncio.get_running_loop().time() + (
+            self.settings.rpc.distributed_instance_startup_timeout_seconds
+            if record["runtime"].get("placement")
+            else self.settings.instances.startup_timeout_seconds
         )
         try:
             while record["status"] in {"starting", "ready"}:
@@ -147,10 +188,23 @@ class InstanceManager:
                             "failed",
                             "llama-server exited unexpectedly; inspect instance log",
                         )
+                        if self.resources:
+                            await self.resources.release(record["id"])
+                        return
+                    if self.resources and not await self.resources.healthy(record):
+                        await adapter.stop(record)
+                        await self._transition(
+                            record,
+                            "failed",
+                            "RPC worker exited or its process identity changed",
+                        )
+                        await self.resources.release(record["id"])
                         return
                     if record["status"] == "starting":
                         if await adapter.health_check(record):
                             await self._transition(record, "ready")
+                            if self.resources:
+                                await self.resources.active(record["id"])
                         elif asyncio.get_running_loop().time() > deadline:
                             await adapter.stop(record)
                             await self._transition(
@@ -158,6 +212,8 @@ class InstanceManager:
                                 "failed",
                                 "Model startup timed out; inspect instance log",
                             )
+                            if self.resources:
+                                await self.resources.release(record["id"])
                             return
                     await adapter.maintain(record)
                 await asyncio.sleep(0.5 if record["status"] == "starting" else 2)
@@ -165,10 +221,17 @@ class InstanceManager:
             raise
         except Exception as exc:
             log.exception("Instance monitor failed")
+            if adapter.get_status(record):
+                await adapter.stop(record)
             await self._transition(record, "failed", str(exc))
+            if self.resources:
+                await self.resources.release(record["id"])
 
     async def destroy(self, instance_id):
         record = self.get(instance_id)
+        if starter := self.start_tasks.get(instance_id):
+            starter.cancel()
+            await asyncio.gather(starter, return_exceptions=True)
         async with self.locks[instance_id]:
             if record["status"] == "stopped":
                 return record
@@ -176,16 +239,30 @@ class InstanceManager:
             try:
                 await self.adapters[record["runtime_type"]].stop(record)
                 await self._transition(record, "stopped")
+                if self.resources:
+                    await self.resources.release(instance_id)
             except Exception as exc:
                 await self._transition(record, "failed", str(exc))
                 raise HTTPException(500, str(exc)) from exc
         return record
 
     async def close(self):
+        self.closing = True
+        starters = list(self.start_tasks.values())
+        for task in starters:
+            task.cancel()
+        await asyncio.gather(*starters, return_exceptions=True)
         tasks = list(self.tasks.values())
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        for record in list(self.instances.values()):
+            adapter = self.adapters[record["runtime_type"]]
+            if record["status"] in ACTIVE or adapter.get_status(record):
+                try:
+                    await self.destroy(record["id"])
+                except Exception:
+                    log.exception("Failed to stop an owned instance during shutdown")
 
     @staticmethod
     def public(record):

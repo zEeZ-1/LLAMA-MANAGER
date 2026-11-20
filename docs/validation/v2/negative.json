@@ -1,0 +1,9 @@
+{
+  "checks": [
+    "wrong password rejected with auth_failed; subsequent key recovery works",
+    "real OpenSSH rejects changed host key and reconnects only after fixture trust restoration",
+    "native RPC crash fails and stops its owned llama-server; claims released after proof; worker restart does not reload model"
+  ],
+  "failed_instance": "afe7b81e-60e4-4ae8-9814-21b66412bb75",
+  "terminated_inference_pid": 38210
+}

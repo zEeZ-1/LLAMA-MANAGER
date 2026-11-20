@@ -1425,3 +1425,107 @@ td strong {
     font-size: 0.9375rem;
   }
 }
+
+/* V2 node and RPC management */
+.nodes-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+.nodes-grid .node-card {
+  max-width: none;
+}
+.device-caption {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.detail-device {
+  display: contents;
+}
+.worker-box {
+  border: 1px solid var(--border);
+  background: #14161a;
+  border-radius: 8px;
+  padding: 18px;
+  margin-top: 18px;
+}
+.worker-box .section-heading {
+  margin-bottom: 9px;
+}
+.worker-box strong {
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.worker-actions {
+  flex-wrap: wrap;
+  margin-top: 15px;
+}
+.jobs-panel {
+  margin-top: 24px;
+}
+.job {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  gap: 12px;
+}
+.job strong {
+  font-size: 0.875rem;
+}
+.job p {
+  overflow-wrap: anywhere;
+}
+.fingerprint-box {
+  padding: 16px;
+  border: 1px solid #f4d35e33;
+  background: #f4d35e08;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+.fingerprint-box strong {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 15px;
+}
+.fingerprint-box code {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.8125rem;
+  margin-bottom: 15px;
+  color: var(--yellow);
+}
+.fingerprint-box .check {
+  margin-bottom: 0;
+}
+.placement-option {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 12px;
+  margin: 9px 0;
+}
+.placement-option label {
+  flex: 1;
+  margin: 0;
+}
+.placement-option input[type="number"] {
+  width: 90px;
+}
+.nodes-grid .card-footer {
+  flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .nodes-grid .node-gpus > div > span:last-child {
+    margin-left: 30px;
+  }
+  .worker-box .section-heading {
+    flex-wrap: wrap;
+  }
+}

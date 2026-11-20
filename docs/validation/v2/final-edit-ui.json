@@ -1,0 +1,7 @@
+{
+  "checks": [
+    "node name edit and restore",
+    "optional autostart defaults off and can be selected without applying deployment"
+  ],
+  "page_errors": []
+}

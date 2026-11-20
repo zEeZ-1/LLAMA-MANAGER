@@ -1,0 +1,4 @@
+# Populate config/rpc_releases.yaml with: .venv/bin/python scripts/package_rpc.py
+# A release is usable only after its local archive, SHA256, commit, protocol,
+# architecture, glibc and remote runtime libraries have been validated.
+releases: []

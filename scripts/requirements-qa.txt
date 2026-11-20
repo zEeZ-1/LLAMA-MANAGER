@@ -1,0 +1,6 @@
+# Optional isolated QA only; not production dependencies.
+asyncssh>=2.20,<3
+playwright>=1.50,<2
+psutil>=6,<8
+httpx>=0.28,<1
+PyYAML>=6,<7

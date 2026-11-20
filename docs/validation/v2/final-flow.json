@@ -1,0 +1,22 @@
+{
+  "checks": [
+    "two password logins, public-key bootstrap, host fingerprints, shared-memory telemetry, release transfer and native RPC readiness",
+    "native two-worker instance, explicit device mapping, exclusive claims and busy stop protection",
+    "real native RPC distributed streaming chat with completion marker"
+  ],
+  "nodes": [
+    "82c5644e-5715-4af5-bea2-5f184207bd39",
+    "8e6f1ab1-937c-4ff3-ac0b-50fb39f48acf"
+  ],
+  "workers": [
+    "9cab2e52-222e-4907-9b9c-1746b0175f9b",
+    "ed0816ef-3d25-468d-9468-5df158afb8e0"
+  ],
+  "instances": [
+    "3ab139fc-c252-4ea6-b500-201fb5e02880"
+  ],
+  "first_sse_seconds": 0.03666163199522998,
+  "event_count": 27,
+  "native_rpc": true,
+  "hardware_environment": "simulated SSH/inventory and native CPU RPC on loopback; not physical remote GPUs"
+}

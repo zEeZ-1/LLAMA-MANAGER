@@ -22,6 +22,20 @@ class LlamaCppAdapter(RuntimeAdapter):
             "--alias",
             instance["id"],
         ]
+        placement = instance["runtime"].get("placement")
+        if placement:
+            cmd += [
+                "--rpc",
+                ",".join(placement["rpc_endpoints"]),
+                "--device",
+                ",".join(placement["device_names"]),
+                "--split-mode",
+                "layer",
+                "--tensor-split",
+                ",".join(str(v) for v in placement["tensor_split"]),
+                "--fit",
+                "off",
+            ]
         for key, flag in {
             "context_size": "-c",
             "batch_size": "-b",
@@ -33,10 +47,15 @@ class LlamaCppAdapter(RuntimeAdapter):
             "cache_type_v": "-ctv",
         }.items():
             cmd += [flag, str(cfg[key])]
+        # The checkbox is a boolean. Passing nothing would select upstream's
+        # automatic mode, which can choose an unsupported remote CUDA kernel.
+        cmd += [
+            "--flash-attn",
+            "on" if cfg["extra_options"].get("flash_attn", False) else "off",
+        ]
         for key, enabled in cfg["extra_options"].items():
-            if enabled:
+            if enabled and key != "flash_attn":
                 cmd += {
-                    "flash_attn": ["--flash-attn", "on"],
                     "mlock": ["--mlock"],
                     "no_mmap": ["--no-mmap"],
                 }[key]
@@ -48,6 +67,24 @@ class LlamaCppAdapter(RuntimeAdapter):
             raise ValueError(
                 "llama-server executable not found; configure LIM_LLAMA_SERVER"
             )
+        if instance["runtime"].get("placement"):
+            proc = await asyncio.create_subprocess_exec(
+                str(binary),
+                "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                output, _ = await asyncio.wait_for(proc.communicate(), 5)
+            finally:
+                if proc.returncode is None:
+                    proc.kill()
+                    await proc.wait()
+            expected = self.settings.rpc.expected_commit[:7]
+            if expected not in output.decode(errors="replace"):
+                raise ValueError(
+                    "Controller llama-server commit does not match the verified RPC package"
+                )
         return await self.supervisor.spawn(
             instance["id"], self.command(instance, model)
         )

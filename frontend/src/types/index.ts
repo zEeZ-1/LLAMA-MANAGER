@@ -4,26 +4,49 @@ export interface Device {
   memory_total: number | null;
   memory_free: number | null;
   properties: { utilization_percent: number | null };
+  backend: string;
+  backend_index: number;
+  memory_kind: "shared" | "dedicated" | "unknown";
+  driver: string | null;
+  compute_state: "ready" | "unverified" | "error";
 }
 export interface Node {
   id: string;
   name: string;
   hostname: string;
   status: string;
+  role: "controller" | "rpc_worker";
+  address?: string;
+  connection_state: string;
+  ssh?: { port: number; username: string; credential_id: string | null };
+  identity?: {
+    machine_id_hash: string | null;
+    ssh_host_key_fingerprint: string | null;
+  };
+  hardware_model?: string | null;
+  sampled_at?: string;
+  telemetry_stale?: boolean;
+  inventory?: Record<string, unknown>;
+  last_error?: { code: string; message: string } | null;
+  rpc_workers?: Worker[];
   os: string;
   architecture: string;
-  cpu_info: { name: string; logical_count: number; usage_percent: number };
+  cpu_info: {
+    name: string;
+    logical_count: number | null;
+    usage_percent: number | null;
+  };
   memory_info: {
-    total: number;
-    used: number;
-    available: number;
-    usage_percent: number;
+    total: number | null;
+    used: number | null;
+    available: number | null;
+    usage_percent: number | null;
   };
   devices: Device[];
   model_count: number;
   instance_count: number;
   ready_count: number;
-  manager_memory_bytes: number;
+  manager_memory_bytes: number | null;
 }
 export interface Model {
   id: string;
@@ -46,6 +69,7 @@ export interface InstanceConfig {
   cache_type_k: string;
   cache_type_v: string;
   extra_options: Record<string, boolean>;
+  placement?: { mode: "local" | "rpc"; devices: PlacementDevice[] };
 }
 export type InstanceStatus =
   | "created"
@@ -63,7 +87,16 @@ export interface Instance {
   runtime_type: string;
   status: InstanceStatus;
   config: InstanceConfig;
-  runtime: { pid: number | null; internal_port: number };
+  runtime: {
+    pid: number | null;
+    internal_port: number;
+    placement?: {
+      worker_ids: string[];
+      device_names: string[];
+      rpc_endpoints: string[];
+      tensor_split: number[];
+    };
+  };
   error_message: string | null;
   created_at: string;
   started_at: string | null;
@@ -87,4 +120,47 @@ export interface ChatSession {
   model_name: string;
   created_at: number;
   updated_at: number;
+}
+
+export interface PlacementDevice {
+  device_id: string;
+  worker_id: string | null;
+  weight: number;
+}
+export interface Worker {
+  autostart?: boolean;
+  id: string;
+  node_id: string;
+  device_ids: string[];
+  endpoint: { host: string; port: number };
+  management_mode: string;
+  controller_id: string | null;
+  service_name: string | null;
+  state: string;
+  release_id: string | null;
+  runtime_commit?: string | null;
+  protocol_version: string | null;
+  process_identity: { pid: number; start_time: string; boot_id: string } | null;
+  claim?: { instance_id: string; state: string } | null;
+  last_error?: { code: string; message: string } | null;
+  rss_bytes?: number;
+}
+export interface Job {
+  id: string;
+  node_id: string;
+  operation: string;
+  state: string;
+  phase: string;
+  message: string;
+  error: { code: string; message: string } | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface Release {
+  id: string;
+  commit: string;
+  protocol_version: string;
+  architecture: string;
+  platform: string;
+  supported_hardware?: string;
 }

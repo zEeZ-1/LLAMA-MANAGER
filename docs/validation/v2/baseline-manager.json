@@ -1,0 +1,30 @@
+{
+  "rss_bytes": 103170048,
+  "uss_bytes": 68321280,
+  "pss_bytes": 72503296,
+  "processes": [
+    {
+      "pid": 60882,
+      "name": "python",
+      "rss": 59027456,
+      "uss": 43401216,
+      "pss": 45435904
+    },
+    {
+      "pid": 60881,
+      "name": "systemd-run",
+      "rss": 6500352,
+      "uss": 901120,
+      "pss": 1619968
+    },
+    {
+      "pid": 60880,
+      "name": "python",
+      "rss": 37642240,
+      "uss": 24018944,
+      "pss": 25447424
+    }
+  ],
+  "excluded_runtime_pids": [],
+  "scope": "V2 zero remote nodes, manager + wrapper only; same model catalog and build; no browser"
+}

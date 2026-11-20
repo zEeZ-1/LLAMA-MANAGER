@@ -2,6 +2,17 @@ import asyncio
 from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from starlette.responses import JSONResponse
+from .api.remote import install_routes
+from .repositories.manager import ManagerStore
+from .remote.ssh_transport import SshTransport
+from .remote.credentials import CredentialStore
+from .services.job_manager import JobManager
+from .services.remote_manager import RemoteManager
+from .services.deployment_service import DeploymentService
+from .services.resource_manager import ResourceManager
+from .core.managed_service import supervised
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
 from .core.config import ROOT, Settings, load_settings
@@ -25,6 +36,7 @@ def create_app(settings: Settings | None = None):
         lock = ManagerLock(cfg.storage.database.with_suffix(".manager.lock"))
         catalog = ModelCatalog(cfg.models)
         manager = None
+        remote = jobs = ssh = None
         async with httpx.AsyncClient(
             trust_env=False,
             timeout=httpx.Timeout(300, connect=5, pool=5),
@@ -37,11 +49,31 @@ def create_app(settings: Settings | None = None):
             try:
                 repository = InstanceRepository(cfg.storage.database)
                 await repository.initialize()
+                store = ManagerStore(cfg.storage.database)
+                await store.initialize()
+                ssh = SshTransport(cfg)
+                credentials = CredentialStore(cfg, store, ssh)
+                await credentials.initialize()
+                jobs = JobManager(store, cfg)
+                await jobs.initialize()
+                remote = RemoteManager(cfg, store, ssh, credentials, jobs)
+                await remote.initialize()
+                (
+                    app.state.store,
+                    app.state.remote,
+                    app.state.credentials,
+                    app.state.jobs,
+                ) = store, remote, credentials, jobs
+                app.state.deployments = DeploymentService(remote)
                 await catalog.initialize()
                 providers = {"local": LocalNodeProvider()}
                 supervisor = ProcessSupervisor(cfg)
                 adapters = {"llama.cpp": LlamaCppAdapter(cfg, supervisor, client)}
-                manager = InstanceManager(cfg, catalog, repository, adapters, providers)
+                resources = ResourceManager(remote, providers["local"])
+                app.state.resources = resources
+                manager = InstanceManager(
+                    cfg, catalog, repository, adapters, providers, resources
+                )
                 await manager.initialize()
                 app.state.catalog, app.state.manager, app.state.providers = (
                     catalog,
@@ -51,13 +83,21 @@ def create_app(settings: Settings | None = None):
                 app.state.gateway = Gateway(cfg, manager, client)
                 yield
             finally:
-                if manager:
-                    await manager.close()
-                await catalog.close()
-                lock.close()
+                try:
+                    if remote:
+                        await remote.close()
+                    if jobs:
+                        await jobs.close()
+                    if manager:
+                        await manager.close()
+                finally:
+                    if ssh:
+                        await ssh.close()
+                    await catalog.close()
+                    lock.close()
 
     app = FastAPI(
-        title="llama.cpp Inference Manager", version="0.1.0", lifespan=lifespan
+        title="llama.cpp Inference Manager", version="0.2.0", lifespan=lifespan
     )
     app.add_middleware(RequestLimits, max_bytes=cfg.limits.max_request_bytes)
     app.add_middleware(
@@ -65,10 +105,26 @@ def create_app(settings: Settings | None = None):
         allowed_hosts=["127.0.0.1", "localhost", "testserver", cfg.server.host],
     )
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc):
+        # Do not echo request inputs: connect/deploy bodies can contain one-time secrets.
+        return JSONResponse(
+            {
+                "detail": [
+                    {k: v for k, v in error.items() if k in {"loc", "msg", "type"}}
+                    for error in exc.errors()
+                ]
+            },
+            status_code=422,
+        )
+
     @app.get("/api/v1/health")
     async def health():
         return {
             "status": "ok",
+            "version": "0.2.0",
+            "managed_lifecycle": supervised(),
+            "ssh_connections": len(app.state.remote.ssh.masters),
             "runtime_available": cfg.runtime.llama_cpp.server_binary.is_file(),
             "active_chats": app.state.gateway.active,
             "memory_budget_bytes": 1024**3,
@@ -77,28 +133,62 @@ def create_app(settings: Settings | None = None):
         }
 
     async def node_detail(node_id):
-        if node_id not in app.state.providers:
-            raise HTTPException(404, "Node not found")
-        node = await app.state.providers[node_id].get()
+        if node_id == "local":
+            node = await app.state.providers["local"].get()
+        else:
+            node = app.state.remote.public_node(app.state.remote.node(node_id))
         node["model_count"] = len(app.state.catalog.list_models(node_id))
+        worker_ids = {
+            w["id"]
+            for w in app.state.remote.workers.values()
+            if w["node_id"] == node_id
+        }
         records = [
-            r for r in app.state.manager.instances.values() if r["node_id"] == node_id
+            r
+            for r in app.state.manager.instances.values()
+            if r["node_id"] == node_id
+            or worker_ids.intersection(
+                r["runtime"].get("placement", {}).get("worker_ids", [])
+            )
         ]
         node["instance_count"] = len(records)
         node["ready_count"] = sum(r["status"] == "ready" for r in records)
+        claims = {c["worker_id"]: c for c in await app.state.store.claims()}
+        for worker in node.get("rpc_workers", []):
+            worker["claim"] = claims.get(worker["id"])
+        for device in node["devices"]:
+            ready = next(
+                (
+                    w
+                    for w in node.get("rpc_workers", [])
+                    if device["id"] in w["device_ids"]
+                    and w["state"] == "ready"
+                    and w.get("protocol_version")
+                ),
+                None,
+            )
+            if ready:
+                device["compute_state"] = "ready"
+                device["last_compute_check_at"] = ready.get("last_compute_check_at")
         return node
 
     @app.get("/api/v1/nodes")
     async def nodes():
-        return {
-            "nodes": await asyncio.gather(
-                *(node_detail(i) for i in app.state.providers)
-            )
-        }
+        identifiers = [
+            "local",
+            *[
+                n["id"]
+                for n in app.state.remote.nodes.values()
+                if not n.get("archived_at")
+            ],
+        ]
+        return {"nodes": await asyncio.gather(*(node_detail(i) for i in identifiers))}
 
     @app.get("/api/v1/nodes/{node_id}")
     async def node(node_id: str):
         return await node_detail(node_id)
+
+    install_routes(app)
 
     @app.get("/api/v1/models")
     async def models(node_id: str | None = None):

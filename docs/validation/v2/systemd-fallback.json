@@ -1,0 +1,1 @@
+{"checks": ["same cgroup despite setsid", "SIGKILL parent", "child ignored SIGTERM", "systemd forced child exit after TimeoutStopSec"], "elapsed_seconds": 10.276176511993981, "timeout_stop_seconds": 10}

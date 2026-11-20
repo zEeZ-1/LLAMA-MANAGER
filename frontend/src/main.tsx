@@ -67,7 +67,7 @@ function App() {
           </span>
         </a>
         <div className="nav-label">
-          WORKSPACE <span>V1</span>
+          WORKSPACE <span>V2</span>
         </div>
         <nav>
           {nav.map(([key, Icon, label]) => (
@@ -89,7 +89,7 @@ function App() {
             <span className={`dot ${instances.isError ? "failed" : "ready"}`} />
             {instances.isError ? "管理服务未连接" : "Local workspace"}
           </div>
-          <span className="muted">llama.cpp · 单机推理</span>
+          <span className="muted">llama.cpp · 集中管理</span>
           <a
             href="https://github.com/ggml-org/llama.cpp"
             target="_blank"

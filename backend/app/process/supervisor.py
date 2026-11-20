@@ -12,7 +12,7 @@ class ProcessSupervisor:
     async def spawn(self, instance_id, argv):
         self.settings.storage.logs.mkdir(parents=True, exist_ok=True)
         filename = self.settings.storage.logs / f"{instance_id}.log"
-        # Direct append-mode output allows inference processes to survive manager restart.
+        # Direct append output avoids an unbounded pipe; systemd owns crash cleanup.
         with filename.open("ab", buffering=0) as output:
             env = {
                 k: v for k, v in os.environ.items() if not k.startswith("LLAMA_ARG_")

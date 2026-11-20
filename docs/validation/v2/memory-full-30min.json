@@ -1,0 +1,113 @@
+{
+  "budget_bytes": 1073741824,
+  "duration_seconds": 1800.0,
+  "passed": true,
+  "peak": {
+    "rss_bytes": 851177472,
+    "uss_bytes": 443510784,
+    "pss_bytes": 551166976,
+    "processes": [
+      {
+        "pid": 33531,
+        "name": "python",
+        "rss": 86245376,
+        "uss": 72261632,
+        "pss": 75248640
+      },
+      {
+        "pid": 51059,
+        "name": "ssh",
+        "rss": 7106560,
+        "uss": 1306624,
+        "pss": 2152448
+      },
+      {
+        "pid": 51085,
+        "name": "ssh",
+        "rss": 7094272,
+        "uss": 1302528,
+        "pss": 2147328
+      },
+      {
+        "pid": 51099,
+        "name": "ssh",
+        "rss": 7094272,
+        "uss": 1302528,
+        "pss": 2147328
+      },
+      {
+        "pid": 51103,
+        "name": "ssh",
+        "rss": 7106560,
+        "uss": 1306624,
+        "pss": 2152448
+      },
+      {
+        "pid": 51107,
+        "name": "gdb",
+        "rss": 126013440,
+        "uss": 118378496,
+        "pss": 120832000
+      },
+      {
+        "pid": 33679,
+        "name": "chrome-headless-shell",
+        "rss": 97280000,
+        "uss": 24268800,
+        "pss": 43907072
+      },
+      {
+        "pid": 33681,
+        "name": "chrome-headless-shell",
+        "rss": 41451520,
+        "uss": 581632,
+        "pss": 10695680
+      },
+      {
+        "pid": 33682,
+        "name": "chrome-headless-shell",
+        "rss": 41459712,
+        "uss": 610304,
+        "pss": 10711040
+      },
+      {
+        "pid": 33702,
+        "name": "chrome-headless-shell",
+        "rss": 72753152,
+        "uss": 12595200,
+        "pss": 26804224
+      },
+      {
+        "pid": 33746,
+        "name": "chrome-headless-shell",
+        "rss": 230342656,
+        "uss": 160362496,
+        "pss": 183424000
+      },
+      {
+        "pid": 33701,
+        "name": "chrome-headless-shell",
+        "rss": 83554304,
+        "uss": 23646208,
+        "pss": 41917440
+      },
+      {
+        "pid": 33530,
+        "name": "systemd-run",
+        "rss": 6291456,
+        "uss": 1560576,
+        "pss": 2181120
+      },
+      {
+        "pid": 33529,
+        "name": "python",
+        "rss": 37384192,
+        "uss": 24027136,
+        "pss": 26846208
+      }
+    ],
+    "excluded_runtime_pids": [
+      38210
+    ]
+  }
+}

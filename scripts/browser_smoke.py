@@ -49,7 +49,7 @@ def main():
             expect(
                 page.get_by_role("heading", name="Local Node", exact=True)
             ).to_be_visible()
-            page.get_by_role("button", name="查看详情", exact=True).click()
+            page.get_by_role("button", name="查看详情", exact=True).first.click()
             expect(page.get_by_text("操作系统", exact=True)).to_be_visible()
             result["checks"].append("dashboard and node details")
             page.get_by_role("button", name="模型", exact=True).click()

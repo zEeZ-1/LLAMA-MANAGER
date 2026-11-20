@@ -1,0 +1,354 @@
+{
+  "checks": [
+    "UI IP/password -> fingerprint -> online; password bootstrap without preconfigured key",
+    "UI multiworker selection, order and ratio -> native inference -> resource release",
+    "UI RPC stop/start/logs; desktop/mobile node layout",
+    "ten registered SSH nodes; password/key bootstrap and connection pool eviction"
+  ],
+  "page_errors": [],
+  "console_errors": [],
+  "memory": {
+    "duration_seconds": 1800.3067484799976,
+    "samples": 875,
+    "roots": [
+      33531,
+      33679
+    ],
+    "baseline": {
+      "rss_bytes": 682864640,
+      "uss_bytes": 244785152,
+      "pss_bytes": 378721280,
+      "processes": [
+        {
+          "pid": 33531,
+          "name": "python",
+          "rss": 71745536,
+          "uss": 56328192,
+          "pss": 60686336
+        },
+        {
+          "pid": 34035,
+          "name": "ssh",
+          "rss": 6848512,
+          "uss": 1314816,
+          "pss": 2423808
+        },
+        {
+          "pid": 34040,
+          "name": "ssh",
+          "rss": 6840320,
+          "uss": 1306624,
+          "pss": 2415616
+        },
+        {
+          "pid": 34045,
+          "name": "ssh",
+          "rss": 6840320,
+          "uss": 1306624,
+          "pss": 2415616
+        },
+        {
+          "pid": 33679,
+          "name": "chrome-headless-shell",
+          "rss": 99934208,
+          "uss": 26198016,
+          "pss": 46229504
+        },
+        {
+          "pid": 33681,
+          "name": "chrome-headless-shell",
+          "rss": 41521152,
+          "uss": 532480,
+          "pss": 10701824
+        },
+        {
+          "pid": 33682,
+          "name": "chrome-headless-shell",
+          "rss": 41529344,
+          "uss": 569344,
+          "pss": 10722304
+        },
+        {
+          "pid": 33702,
+          "name": "chrome-headless-shell",
+          "rss": 72839168,
+          "uss": 12648448,
+          "pss": 26903552
+        },
+        {
+          "pid": 33746,
+          "name": "chrome-headless-shell",
+          "rss": 220921856,
+          "uss": 120352768,
+          "pss": 158827520
+        },
+        {
+          "pid": 33701,
+          "name": "chrome-headless-shell",
+          "rss": 113844224,
+          "uss": 24227840,
+          "pss": 57395200
+        }
+      ],
+      "excluded_runtime_pids": []
+    },
+    "first": {
+      "rss_bytes": 694300672,
+      "uss_bytes": 250699776,
+      "pss_bytes": 384551936,
+      "processes": [
+        {
+          "pid": 33531,
+          "name": "python",
+          "rss": 75853824,
+          "uss": 60436480,
+          "pss": 64790528
+        },
+        {
+          "pid": 34132,
+          "name": "ssh",
+          "rss": 6840320,
+          "uss": 1306624,
+          "pss": 2121728
+        },
+        {
+          "pid": 34142,
+          "name": "ssh",
+          "rss": 6828032,
+          "uss": 1306624,
+          "pss": 2121728
+        },
+        {
+          "pid": 34152,
+          "name": "ssh",
+          "rss": 6836224,
+          "uss": 1302528,
+          "pss": 2117632
+        },
+        {
+          "pid": 34162,
+          "name": "ssh",
+          "rss": 6840320,
+          "uss": 1306624,
+          "pss": 2121728
+        },
+        {
+          "pid": 33679,
+          "name": "chrome-headless-shell",
+          "rss": 99942400,
+          "uss": 26206208,
+          "pss": 46234624
+        },
+        {
+          "pid": 33681,
+          "name": "chrome-headless-shell",
+          "rss": 41521152,
+          "uss": 532480,
+          "pss": 10700800
+        },
+        {
+          "pid": 33682,
+          "name": "chrome-headless-shell",
+          "rss": 41529344,
+          "uss": 569344,
+          "pss": 10720256
+        },
+        {
+          "pid": 33702,
+          "name": "chrome-headless-shell",
+          "rss": 72880128,
+          "uss": 12689408,
+          "pss": 26941440
+        },
+        {
+          "pid": 33746,
+          "name": "chrome-headless-shell",
+          "rss": 221384704,
+          "uss": 120815616,
+          "pss": 159288320
+        },
+        {
+          "pid": 33701,
+          "name": "chrome-headless-shell",
+          "rss": 113844224,
+          "uss": 24227840,
+          "pss": 57393152
+        }
+      ],
+      "excluded_runtime_pids": []
+    },
+    "final": {
+      "rss_bytes": 743268352,
+      "uss_bytes": 363495424,
+      "pss_bytes": 462185472,
+      "processes": [
+        {
+          "pid": 33531,
+          "name": "python",
+          "rss": 87470080,
+          "uss": 72454144,
+          "pss": 75127808
+        },
+        {
+          "pid": 70598,
+          "name": "ssh",
+          "rss": 7159808,
+          "uss": 1306624,
+          "pss": 1861632
+        },
+        {
+          "pid": 70602,
+          "name": "ssh",
+          "rss": 7143424,
+          "uss": 1302528,
+          "pss": 1854464
+        },
+        {
+          "pid": 70606,
+          "name": "ssh",
+          "rss": 7159808,
+          "uss": 1306624,
+          "pss": 1855488
+        },
+        {
+          "pid": 70610,
+          "name": "ssh",
+          "rss": 7147520,
+          "uss": 1306624,
+          "pss": 1852416
+        },
+        {
+          "pid": 33679,
+          "name": "chrome-headless-shell",
+          "rss": 97280000,
+          "uss": 24268800,
+          "pss": 43935744
+        },
+        {
+          "pid": 33681,
+          "name": "chrome-headless-shell",
+          "rss": 41451520,
+          "uss": 581632,
+          "pss": 10726400
+        },
+        {
+          "pid": 33682,
+          "name": "chrome-headless-shell",
+          "rss": 41459712,
+          "uss": 610304,
+          "pss": 10741760
+        },
+        {
+          "pid": 33702,
+          "name": "chrome-headless-shell",
+          "rss": 72843264,
+          "uss": 12685312,
+          "pss": 26924032
+        },
+        {
+          "pid": 33746,
+          "name": "chrome-headless-shell",
+          "rss": 292446208,
+          "uss": 224169984,
+          "pss": 246373376
+        },
+        {
+          "pid": 33701,
+          "name": "chrome-headless-shell",
+          "rss": 81707008,
+          "uss": 23502848,
+          "pss": 40932352
+        }
+      ],
+      "excluded_runtime_pids": []
+    },
+    "peak": {
+      "rss_bytes": 743268352,
+      "uss_bytes": 363495424,
+      "pss_bytes": 462185472,
+      "processes": [
+        {
+          "pid": 33531,
+          "name": "python",
+          "rss": 87470080,
+          "uss": 72454144,
+          "pss": 75127808
+        },
+        {
+          "pid": 70598,
+          "name": "ssh",
+          "rss": 7159808,
+          "uss": 1306624,
+          "pss": 1861632
+        },
+        {
+          "pid": 70602,
+          "name": "ssh",
+          "rss": 7143424,
+          "uss": 1302528,
+          "pss": 1854464
+        },
+        {
+          "pid": 70606,
+          "name": "ssh",
+          "rss": 7159808,
+          "uss": 1306624,
+          "pss": 1855488
+        },
+        {
+          "pid": 70610,
+          "name": "ssh",
+          "rss": 7147520,
+          "uss": 1306624,
+          "pss": 1852416
+        },
+        {
+          "pid": 33679,
+          "name": "chrome-headless-shell",
+          "rss": 97280000,
+          "uss": 24268800,
+          "pss": 43935744
+        },
+        {
+          "pid": 33681,
+          "name": "chrome-headless-shell",
+          "rss": 41451520,
+          "uss": 581632,
+          "pss": 10726400
+        },
+        {
+          "pid": 33682,
+          "name": "chrome-headless-shell",
+          "rss": 41459712,
+          "uss": 610304,
+          "pss": 10741760
+        },
+        {
+          "pid": 33702,
+          "name": "chrome-headless-shell",
+          "rss": 72843264,
+          "uss": 12685312,
+          "pss": 26924032
+        },
+        {
+          "pid": 33746,
+          "name": "chrome-headless-shell",
+          "rss": 292446208,
+          "uss": 224169984,
+          "pss": 246373376
+        },
+        {
+          "pid": 33701,
+          "name": "chrome-headless-shell",
+          "rss": 81707008,
+          "uss": 23502848,
+          "pss": 40932352
+        }
+      ],
+      "excluded_runtime_pids": []
+    },
+    "max_ssh_connections": 4,
+    "budget_bytes": 1073741824,
+    "passed": true
+  }
+}

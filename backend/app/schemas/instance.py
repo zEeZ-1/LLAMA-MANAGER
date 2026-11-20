@@ -6,6 +6,27 @@ CacheType = Literal[
 ]
 
 
+class PlacementDevice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device_id: str = Field(min_length=1, max_length=128)
+    worker_id: str | None = Field(None, max_length=64)
+    weight: float = Field(1, gt=0, le=100000)
+
+
+class Placement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["local", "rpc"] = "local"
+    devices: list[PlacementDevice] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def unique_devices(self):
+        if len({d.device_id for d in self.devices}) != len(self.devices):
+            raise ValueError("Devices may only be selected once")
+        if self.mode == "local" and self.devices:
+            raise ValueError("Explicit device placement requires rpc mode")
+        return self
+
+
 class InstanceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     context_size: int = Field(4096, ge=128, le=1048576)
@@ -16,12 +37,15 @@ class InstanceConfig(BaseModel):
     n_gpu_layers: int = Field(0, ge=0, le=999)
     cache_type_k: CacheType = "f16"
     cache_type_v: CacheType = "f16"
+    placement: Placement = Field(default_factory=Placement)
     extra_options: dict[Literal["flash_attn", "mlock", "no_mmap"], bool] = Field(
         default_factory=dict
     )
 
     @model_validator(mode="after")
     def compatible(self):
+        if self.placement.mode == "rpc" and self.n_gpu_layers == 0:
+            raise ValueError("RPC GPU mode requires n_gpu_layers > 0")
         if self.ubatch_size > self.batch_size:
             raise ValueError("ubatch_size must not exceed batch_size")
         if self.context_size < self.parallel * 128:

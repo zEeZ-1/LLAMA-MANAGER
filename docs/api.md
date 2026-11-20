@@ -1,4 +1,4 @@
-# V1 API
+# API（V2 实现，沿用 `/api/v1` 路径）
 
 前缀 `/api/v1`。运行后可通过 `/docs` 查看自动生成的 OpenAPI 文档。管理端默认 `127.0.0.1:8000`，前端不访问推理进程端口。
 
@@ -65,4 +65,56 @@ Chat：
 | 429 | 并发 Chat 已满 |
 | 502 | 上游连接、状态或响应大小异常 |
 
-上游连接超时 5 秒，读取超时 300 秒；客户端断连后关闭上游请求。V1 没有 API key / 账户管理；应只暴露给可信本机访问。
+上游连接超时 5 秒，读取超时 300 秒；客户端断连后关闭上游请求。当前没有 API key / 账户管理；应只暴露给可信本机访问。
+
+
+## V2 节点、RPC 与后台任务
+
+创建多机实例时，模型和 `node_id: local` 仍属于控制端。在 config 中加入以下字段（其余字段与单机一致）：
+
+```json
+{
+  "n_gpu_layers": 99,
+  "placement": {
+    "mode": "rpc",
+    "devices": [
+      {"device_id":"节点ID:cuda:0", "worker_id":"worker UUID", "weight":2},
+      {"device_id":"local:cuda:0", "worker_id":null, "weight":1}
+    ]
+  }
+}
+```
+
+数组顺序就是分配顺序；至少一个远端 worker，GPU layers 必须大于 0。创建前先原子预留所有 worker，冲突返回 409，接受后返回 202，远端准备和模型加载均在后台完成。销毁 starting 实例会取消准备并核对资源。`runtime.placement` 保存实际设备映射、RPC 端点与 worker 版本 / 进程身份。省略 placement 时仍为单机。
+
+部署、连接、刷新和启停返回 202 Job，轮询 `/jobs/{id}`，状态为 queued/running/completed/failed/interrupted。
+
+| 方法 | 路径 | 行为 |
+| --- | --- | --- |
+| POST | `/nodes` | 201，登记 name/address/username/port/credential_id；address 为允许网段中的 IPv4 |
+| PATCH | `/nodes/{id}` | 修改名称 / SSH 配置；有占用时拒绝，修改连接前须停止 RPC |
+| DELETE | `/nodes/{id}` | 归档空闲且 RPC 已停止的节点，保留历史和远端文件 |
+| POST | `/nodes/{id}/host-key/scan` | 返回 challenge_id、候选公钥指纹和已信任指纹 |
+| POST | `/nodes/{id}/host-key/trust` | challenge_id/fingerprint；主机密钥变化须 replace:true |
+| POST | `/nodes/{id}/connect` | `{password:"一次性密码"}` 登录并配置专用公钥；后续 `{}` 使用密钥 / agent |
+| POST | `/nodes/{id}/refresh` | 后台强制采集完整配置和 RPC 状态 |
+| GET | `/nodes/{id}/telemetry` | 缓存指标，不触发 SSH |
+| GET | `/nodes/{id}/workers` | worker 列表及 claim 占用 |
+| POST | `/nodes/{id}/workers` | device_ids/port/mode；observed 模式还需 service_name |
+| GET | `/releases` | 控制端发布清单的公开部分 |
+| POST | `/workers/{id}/deploy` | release_id/enable_linger/sudo_password/start/autostart；默认 start:true、autostart:false |
+| POST | `/workers/{id}/adopt` | 指定 release_id，验证正在运行的外部服务后接管 |
+| POST | `/workers/{id}/start`、`/stop` | `{}` 或 `{idempotency_key:"..."}`，操作已核验所属的 RPC |
+| POST | `/workers/{id}/cache/clean` | 仅清理已停止的平台自有缓存；拒绝外部关联缓存 |
+| POST | `/workers/{id}/reconcile` | 核对已退出实例的隔离占用，不强行释放仍在运行实例的资源 |
+| GET | `/workers/{id}/logs` | 最后 32 KiB 日志 |
+| GET | `/jobs`、`/jobs/{id}` | 最近任务 / 单任务，最多保留 50 条已结束任务 |
+| POST | `/jobs/{id}/cancel` | 取消任务，必要时后续核对实际远端状态 |
+| GET | `/credentials` | 密钥摘要、可选本机文件名，不返回私钥内容 / 路径 |
+| POST | `/credentials` | `{type:"generated",label:"..."}` 或 `{type:"existing",key_name:"id_ed25519",label:"..."}` |
+
+主机指纹 challenge 5 分钟过期，绑定节点 IP 和端口。密码不进入 Node / Job / SQLite / 日志，参数错误不回显请求值，不要将密码放入 URL。
+
+统一 Node 新增 connection_state、role、hardware_model、inventory、telemetry、rpc_workers；指标包含 status/source/sampled_at/stale。设备包含 memory_kind(shared/dedicated/unknown) 和 compute_state；memory_total/free:null 表示缺失或共享内存，不代表 GPU 不可计算。GET /nodes 使用缓存，不进行远端 SSH。GET /health 的 managed_lifecycle 表示是否使用默认系统托管入口，ssh_connections 为当前池大小。
+
+远端错误为 `detail:{code,message}`，如 auth_failed、host_key_changed、unsupported_platform、checksum_mismatch、service_identity_changed、worker_busy、node_operation_busy。部分旧接口错误仍为字符串，客户端同时兼容两者。

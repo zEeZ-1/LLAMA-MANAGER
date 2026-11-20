@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { X, Play, AlertCircle } from "lucide-react";
 import { api, useModels, useNodes, errorText } from "../services/api";
 import { useUI } from "../services/ui";
-import type { Instance, InstanceConfig } from "../types";
+import type { Instance, InstanceConfig, PlacementDevice } from "../types";
 
 export function CreateInstance() {
   const { createModel, closeCreate, navigate } = useUI();
@@ -23,6 +23,7 @@ export function CreateInstance() {
     cache_type_k: "f16",
     cache_type_v: "f16",
     extra_options: {},
+    placement: { mode: "local", devices: [] },
   });
   const mutation = useMutation({
     mutationFn: () =>
@@ -43,6 +44,38 @@ export function CreateInstance() {
       closeCreate();
     },
   });
+  const placement = config.placement || { mode: "local", devices: [] };
+  const options = (nodes.data?.nodes || []).flatMap((node) =>
+    node.devices.flatMap((device) => {
+      if (node.id === "local")
+        return [
+          {
+            device_id: device.id,
+            worker_id: null as string | null,
+            label: `${node.name} · ${device.name}`,
+          },
+        ];
+      const worker = node.rpc_workers?.find(
+        (w) =>
+          w.management_mode === "managed" &&
+          w.state === "ready" &&
+          !w.claim &&
+          w.device_ids.includes(device.id),
+      );
+      return worker
+        ? [
+            {
+              device_id: device.id,
+              worker_id: worker.id,
+              label: `${node.name} · ${device.name}`,
+            },
+          ]
+        : [];
+    }),
+  );
+  function setPlacement(devices: PlacementDevice[]) {
+    setConfig({ ...config, placement: { mode: "rpc", devices } });
+  }
   const fields = [
     ["context_size", "Context size", 128, 1048576],
     ["n_gpu_layers", "GPU layers", 0, 999],
@@ -93,11 +126,13 @@ export function CreateInstance() {
                   setModelId("");
                 }}
               >
-                {(nodes.data?.nodes || []).map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.name} · {n.hostname}
-                  </option>
-                ))}
+                {(nodes.data?.nodes || [])
+                  .filter((n) => n.role === "controller")
+                  .map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {n.name} · {n.hostname}
+                    </option>
+                  ))}
               </select>
             </label>
             <label>
@@ -122,6 +157,115 @@ export function CreateInstance() {
           {!models.data?.models.length && (
             <div className="notice">
               将完整 GGUF 文件放入配置的模型目录后，这里会自动更新。
+            </div>
+          )}
+          <label>
+            推理方式
+            <select
+              aria-label="推理方式"
+              value={placement.mode}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  n_gpu_layers:
+                    e.target.value === "rpc" && config.n_gpu_layers === 0
+                      ? 99
+                      : config.n_gpu_layers,
+                  placement: {
+                    mode: e.target.value as "local" | "rpc",
+                    devices: [],
+                  },
+                })
+              }
+            >
+              <option value="local">单机</option>
+              <option value="rpc">多机 RPC</option>
+            </select>
+          </label>
+          {placement.mode === "rpc" && (
+            <div className="placement-panel">
+              <p className="muted">
+                选择空闲的已验证 worker；设备按选中顺序分配，权重为相对比例。
+              </p>
+              {options.map((option) => {
+                const selected = placement.devices.find(
+                  (d) => d.device_id === option.device_id,
+                );
+                return (
+                  <div className="placement-option" key={option.device_id}>
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={!!selected}
+                        onChange={(e) =>
+                          setPlacement(
+                            e.target.checked
+                              ? [
+                                  ...placement.devices,
+                                  {
+                                    device_id: option.device_id,
+                                    worker_id: option.worker_id,
+                                    weight: 1,
+                                  },
+                                ]
+                              : placement.devices.filter(
+                                  (d) => d.device_id !== option.device_id,
+                                ),
+                          )
+                        }
+                      />
+                      {option.label}
+                    </label>
+                  </div>
+                );
+              })}
+              {!options.some((o) => o.worker_id) && (
+                <div className="notice">
+                  暂无空闲且已验证的远端 RPC。请先在节点页面完成部署。
+                </div>
+              )}
+              {placement.devices.map((item, index) => (
+                <div className="placement-option" key={item.device_id}>
+                  <span>
+                    {index + 1}.{" "}
+                    {options.find((o) => o.device_id === item.device_id)?.label}
+                  </span>
+                  <input
+                    aria-label={`设备 ${index + 1} 分配权重`}
+                    type="number"
+                    min={0.001}
+                    max={100000}
+                    step="any"
+                    required
+                    value={item.weight}
+                    onChange={(e) =>
+                      setPlacement(
+                        placement.devices.map((d) =>
+                          d.device_id === item.device_id
+                            ? { ...d, weight: Number(e.target.value) }
+                            : d,
+                        ),
+                      )
+                    }
+                  />
+                  {index > 0 && (
+                    <button
+                      type="button"
+                      className="small"
+                      onClick={() => {
+                        const ordered = [...placement.devices];
+                        [ordered[index - 1], ordered[index]] = [
+                          ordered[index],
+                          ordered[index - 1],
+                        ];
+                        setPlacement(ordered);
+                      }}
+                    >
+                      前移
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
           <label>
@@ -206,7 +350,12 @@ export function CreateInstance() {
             </button>
             <button
               className="primary"
-              disabled={!modelId || mutation.isPending}
+              disabled={
+                !modelId ||
+                mutation.isPending ||
+                (placement.mode === "rpc" &&
+                  !placement.devices.some((d) => d.worker_id))
+              }
             >
               <Play size={16} />
               {mutation.isPending ? "正在创建…" : "创建并启动"}
