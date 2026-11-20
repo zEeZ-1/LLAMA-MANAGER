@@ -6,6 +6,8 @@
 
 V2 已实现密码接入与自动密钥引导、主机指纹确认、远端配置采集、匹配发布包部署、RPC 自动发现、新建 / 删除 / 启停 / 日志 / 缓存，以及按设备顺序和权重创建多机实例。远端无需安装管理 Agent。Jetson 显示共享系统内存，显存指标缺失不会被显示为 GPU 不可用。测试范围和真实硬件联调状态见 [V2 验证记录](docs/validation_v2.md)。
 
+V3 Image 的目录规范、自动类型识别、多模态实例及前后端图片链路见 [V3 开发设计](docs/development_v3.md)。该版本目前处于设计阶段，以下快速开始仍对应已实现的 V2。
+
 ## 快速开始
 
 要求 Linux、可用的 systemd 用户服务、OpenSSH 客户端（ssh/scp/ssh-keyscan/ssh-keygen）、Python 3.12+、Node.js 22.12+（仅开发 / 构建）和可用的 llama.cpp。默认入口通过 systemd 托管后端及其推理进程，以保证后端崩溃后回收模型进程。
