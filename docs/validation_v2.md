@@ -89,3 +89,12 @@ qa_v2_flow.py 支持 --root、--url、--rpc-port-base；qa_v2_lifecycle.py 通�
 
 
 其他原始证据：[双 worker 流程](validation/v2/final-flow.json)、[SIGKILL 生命周期](validation/v2/final-lifecycle.json)、[真实 CUDA RPC](validation/v2/local-rpc-cuda.json)、[强杀兜底](validation/v2/systemd-fallback.json)、[七路压力](validation/v2/stress.json)、[故障注入](validation/v2/negative.json)、[密码落盘检查](validation/v2/secrets.json)、[Chat 回归](validation/v2/chat-regression.json)。截图：[桌面](validation/v2/final-nodes-desktop.png)、[390px 移动端](validation/v2/final-nodes-mobile.png)。
+
+
+## 补充修复：SSH 默认端口的受信记录
+
+真实节点 192.168.50.12:22 首次连接暴露一个隔离环境随机高端口测试未覆盖的问题：OpenSSH 默认端口按裸 IP 查找 known_hosts，原实现统一写成 [IP]:22，导致“找不到受信主机记录”被误报为主机密钥变化。实际扫描指纹与用户已确认指纹相同。
+
+已修复默认端口写裸 IP、非默认端口写 [IP]:port；旧记录只在公钥指纹与原有信任完全匹配时修正格式，不替换公钥、不关闭严格校验。同时区分“未找到受信记录”和“主机密钥实际变化”。新增 4 个回归用例，通过原生 ssh-keygen 的查找验证默认 / 非默认端口以及旧格式迁移与信任保护。全量后端测试现为 36 项。
+
+现有节点经修正后，真实 SSH 已通过主机身份核验并进入用户认证阶段；该诊断没有发送用户密码或启动远端 RPC。

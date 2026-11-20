@@ -29,6 +29,32 @@ class SshTransport:
     def known_hosts(self, node):
         return self.root / (node["id"] + ".known_hosts")
 
+    @staticmethod
+    def host_pattern(node):
+        address, port = node["address"], node["ssh"]["port"]
+        return address if port == 22 else f"[{address}]:{port}"
+
+    def repair_legacy_host(self, node):
+        """Fix the old port-22 spelling only for the exact already-trusted key."""
+        path = self.known_hosts(node)
+        if node["ssh"]["port"] != 22 or not path.is_file():
+            return False
+        content = path.read_text()
+        fields = content.split()
+        if len(fields) != 3 or fields[0] != f"[{node['address']}]:22":
+            return False
+        try:
+            fingerprint = "SHA256:" + base64.b64encode(
+                hashlib.sha256(base64.b64decode(fields[2], validate=True)).digest()
+            ).decode().rstrip("=")
+        except ValueError:
+            return False
+        if fingerprint != node.get("identity", {}).get("ssh_host_key_fingerprint"):
+            return False
+        path.write_text(f"{self.host_pattern(node)} {fields[1]} {fields[2]}\n")
+        path.chmod(0o600)
+        return True
+
     async def run(self, argv, stdin=None, timeout=None, env=None, limit=None):
         limit = limit or self.cfg.ssh.max_output_bytes
         proc = await asyncio.create_subprocess_exec(
@@ -134,12 +160,14 @@ class SshTransport:
 
     @staticmethod
     def ssh_error(error):
-        if (
-            "REMOTE HOST IDENTIFICATION HAS CHANGED" in error
-            or "Host key verification failed" in error
-        ):
+        if "REMOTE HOST IDENTIFICATION HAS CHANGED" in error:
             return ManagerError(
                 "host_key_changed", "SSH 主机密钥不匹配，请重新核验指纹"
+            )
+        if "host key is known" in error or "Host key verification failed" in error:
+            return ManagerError(
+                "host_key_untrusted",
+                "SSH 未找到可用的受信主机记录，请重新检测并核验指纹",
             )
         if "Permission denied" in error:
             return ManagerError("auth_failed", "SSH 认证失败，请检查用户名、密码或密钥")
@@ -213,6 +241,7 @@ class SshTransport:
             secret = b""
 
     async def _master(self, node, password=None):
+        self.repair_legacy_host(node)
         if not self.known_hosts(node).exists():
             raise ManagerError("host_key_untrusted", "请先核对并信任 SSH 主机指纹")
         async with self.pool_lock:

@@ -30,6 +30,7 @@ const connectionNames: Record<string, string> = {
   offline: "离线",
   auth_failed: "认证失败",
   host_key_changed: "主机身份变化",
+  host_key_untrusted: "待核验主机",
   connecting: "连接中",
 };
 const workerNames: Record<string, string> = {
@@ -841,7 +842,7 @@ function ConnectModal({
             void (challenge
               ? connect()
               : node?.identity?.ssh_host_key_fingerprint &&
-                  node.connection_state !== "host_key_changed"
+                  !["host_key_changed", "host_key_untrusted"].includes(node.connection_state)
                 ? connectKnown()
                 : scan());
           }}

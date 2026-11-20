@@ -286,7 +286,7 @@ class RemoteManager:
             await self.ssh.close_node(identifier)
             path = self.ssh.known_hosts(node)
             path.write_text(
-                f"[{node['address']}]:{node['ssh']['port']} {key['algorithm']} {key['key']}\n"
+                f"{self.ssh.host_pattern(node)} {key['algorithm']} {key['key']}\n"
             )
             path.chmod(0o600)
             node["identity"]["ssh_host_key_fingerprint"] = body.fingerprint
@@ -329,7 +329,9 @@ class RemoteManager:
                 else "ssh_unreachable"
             )
             node["connection_state"] = (
-                code if code in {"auth_failed", "host_key_changed"} else "offline"
+                code
+                if code in {"auth_failed", "host_key_changed", "host_key_untrusted"}
+                else "offline"
             )
             node["last_error"] = {
                 "code": code,
