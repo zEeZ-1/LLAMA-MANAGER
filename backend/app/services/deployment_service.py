@@ -88,7 +88,7 @@ class DeploymentService:
                 if listeners.strip() and not worker.get("release_id"):
                     raise ManagerError(
                         "port_conflict",
-                        "RPC 端口已被外部进程占用，请换端口或显式关联已有服务",
+                        f"{worker['endpoint']['host']}:{port} 已被现有进程占用，请修改 RPC 配置换用空闲端口，或关联已有服务后验证接管",
                     )
                 await remote.jobs.phase(job, "preparing", "正在准备所属目录和磁盘空间")
                 prepared = await remote.ssh.script(

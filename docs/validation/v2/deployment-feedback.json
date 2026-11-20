@@ -1,0 +1,9 @@
+{
+  "checks": [
+    "accepted deployment stays open with progress; asynchronous port error appears inside modal; retry is enabled",
+    "modal closes only after completed job",
+    "uninstalled worker exposes port edit and submits PATCH"
+  ],
+  "page_errors": [],
+  "scope": "Browser-only intercepted deploy/job/config responses; no real deployment or node configuration changed."
+}

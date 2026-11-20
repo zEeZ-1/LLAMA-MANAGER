@@ -101,6 +101,7 @@ Chat：
 | GET | `/nodes/{id}/telemetry` | 缓存指标，不触发 SSH |
 | GET | `/nodes/{id}/workers` | worker 列表及 claim 占用 |
 | POST | `/nodes/{id}/workers` | device_ids/port/mode；observed 模式还需 service_name |
+| PATCH | `/workers/{id}` | 部署前修改完整 WorkerConfig（device_ids/port/mode/service_name）；拒绝有占用、已部署或已接管的 worker |
 | GET | `/releases` | 控制端发布清单的公开部分 |
 | POST | `/workers/{id}/deploy` | release_id/enable_linger/sudo_password/start/autostart；默认 start:true、autostart:false |
 | POST | `/workers/{id}/adopt` | 指定 release_id，验证正在运行的外部服务后接管 |

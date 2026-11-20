@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Cpu,
@@ -68,6 +68,10 @@ export function Nodes() {
   const [edit, setEdit] = useState<Node | null>(null);
   const [details, setDetails] = useState<string | null>(null);
   const [workerNode, setWorkerNode] = useState<Node | null>(null);
+  const [editingWorker, setEditingWorker] = useState<{
+    node: Node;
+    worker: Worker;
+  } | null>(null);
   const [deployment, setDeployment] = useState<Worker | null>(null);
   const [logWorker, setLogWorker] = useState<Worker | null>(null);
   const [error, setError] = useState("");
@@ -100,6 +104,16 @@ export function Nodes() {
     }
   }
   const activeJobs = jobs.data?.jobs.slice(0, 6) || [];
+  const workerJobs = new Map<string, Job>();
+  for (const job of jobs.data?.jobs || []) {
+    if (
+      ["deploy", "adopt", "start", "stop", "clean", "reconcile"].includes(
+        job.operation,
+      ) &&
+      !workerJobs.has(job.node_id)
+    )
+      workerJobs.set(job.node_id, job);
+  }
   return (
     <>
       <div className="section-heading">
@@ -276,7 +290,17 @@ export function Nodes() {
                 {worker.last_error && (
                   <div className="error">{worker.last_error.message}</div>
                 )}
+                <WorkerJobStatus job={workerJobs.get(node.id)} />
                 <div className="row-actions worker-actions">
+                  {!worker.release_id && (
+                    <button
+                      className="small"
+                      disabled={working || !!worker.claim}
+                      onClick={() => setEditingWorker({ node, worker })}
+                    >
+                      修改 RPC 配置
+                    </button>
+                  )}
                   <button
                     className="small"
                     disabled={working || !!worker.claim}
@@ -502,6 +526,17 @@ export function Nodes() {
           }}
         />
       )}
+      {editingWorker && (
+        <WorkerModal
+          node={editingWorker.node}
+          worker={editingWorker.worker}
+          onClose={() => setEditingWorker(null)}
+          onDone={() => {
+            setEditingWorker(null);
+            refresh();
+          }}
+        />
+      )}
       {deployment && (
         <DeployModal
           worker={deployment}
@@ -534,6 +569,20 @@ export function Nodes() {
         </div>
       )}
     </>
+  );
+}
+
+function WorkerJobStatus({ job }: { job?: Job }) {
+  if (!job || job.state === "completed") return null;
+  const failed = ["failed", "interrupted"].includes(job.state);
+  return (
+    <div
+      className={failed ? "error" : "notice"}
+      role={failed ? "alert" : "status"}
+    >
+      {operationNames[job.operation] || "节点任务"} · {jobNames[job.state]}：
+      {job.error?.message || job.message}
+    </div>
   );
 }
 
@@ -842,7 +891,9 @@ function ConnectModal({
             void (challenge
               ? connect()
               : node?.identity?.ssh_host_key_fingerprint &&
-                  !["host_key_changed", "host_key_untrusted"].includes(node.connection_state)
+                  !["host_key_changed", "host_key_untrusted"].includes(
+                    node.connection_state,
+                  )
                 ? connectKnown()
                 : scan());
           }}
@@ -1029,32 +1080,41 @@ function ConnectModal({
 
 function WorkerModal({
   node,
+  worker,
   onClose,
   onDone,
 }: {
   node: Node;
+  worker?: Worker;
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [selected, setSelected] = useState(node.devices.map((d) => d.id));
-  const [port, setPort] = useState(50052);
-  const [mode, setMode] = useState("managed");
-  const [service, setService] = useState("");
+  const [selected, setSelected] = useState(
+    worker?.device_ids || node.devices.map((d) => d.id),
+  );
+  const [port, setPort] = useState(worker?.endpoint.port || 50052);
+  const [mode, setMode] = useState(worker?.management_mode || "managed");
+  const [service, setService] = useState(
+    worker?.management_mode === "observed" ? worker.service_name || "" : "",
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit() {
     setBusy(true);
     setError("");
     try {
-      await api(`/nodes/${node.id}/workers`, {
-        method: "POST",
-        body: JSON.stringify({
-          port,
-          device_ids: selected,
-          mode,
-          service_name: mode === "observed" ? service : null,
-        }),
-      });
+      await api(
+        worker ? `/workers/${worker.id}` : `/nodes/${node.id}/workers`,
+        {
+          method: worker ? "PATCH" : "POST",
+          body: JSON.stringify({
+            port,
+            device_ids: selected,
+            mode,
+            service_name: mode === "observed" ? service : null,
+          }),
+        },
+      );
       onDone();
     } catch (e) {
       setError(errorText(e));
@@ -1166,22 +1226,48 @@ function DeployModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const observed = worker.management_mode === "observed";
+  const [jobId, setJobId] = useState<string | null>(null);
+  const job = useQuery({
+    queryKey: ["deployment-job", jobId],
+    enabled: !!jobId,
+    queryFn: () => api<Job>(`/jobs/${jobId}`),
+    refetchInterval: (query) =>
+      ["completed", "failed", "interrupted"].includes(
+        query.state.data?.state || "",
+      )
+        ? false
+        : 1000,
+  });
+  const running =
+    !!jobId &&
+    !["completed", "failed", "interrupted"].includes(job.data?.state || "");
+  const failure =
+    error ||
+    job.data?.error?.message ||
+    (job.error ? "读取部署进度失败，正在重试；可关闭窗口后查看节点任务" : "");
+  useEffect(() => {
+    if (job.data?.state === "completed") onDone();
+  }, [job.data?.state, onDone]);
   async function submit() {
     setBusy(true);
     setError("");
+    setJobId(null);
     try {
-      await api(`/workers/${worker.id}/${observed ? "adopt" : "deploy"}`, {
-        method: "POST",
-        body: JSON.stringify({
-          release_id: release,
-          enable_linger: linger,
-          autostart,
-          sudo_password: sudoPassword || null,
-          start: true,
-        }),
-      });
+      const submitted = await api<Job>(
+        `/workers/${worker.id}/${observed ? "adopt" : "deploy"}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            release_id: release,
+            enable_linger: linger,
+            autostart,
+            sudo_password: sudoPassword || null,
+            start: true,
+          }),
+        },
+      );
       setSudoPassword("");
-      onDone();
+      setJobId(submitted.id);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -1265,13 +1351,29 @@ function DeployModal({
               )}
             </>
           )}
-          {error && <div className="error">{error}</div>}
+          {running && (
+            <div className="notice" role="status">
+              {job.data?.message || "任务已提交，正在读取进度…"}
+              。关闭窗口后任务会继续。
+            </div>
+          )}
+          {failure && (
+            <div className="error" role="alert">
+              {failure}
+            </div>
+          )}
           <div className="modal-actions">
             <button type="button" onClick={onClose}>
-              取消
+              {jobId ? "关闭" : "取消"}
             </button>
-            <button className="primary" disabled={busy || !release}>
-              {busy ? "正在提交…" : observed ? "核验并接管" : "部署并启动"}
+            <button className="primary" disabled={busy || running || !release}>
+              {busy
+                ? "正在提交…"
+                : running
+                  ? "正在执行…"
+                  : observed
+                    ? "核验并接管"
+                    : "部署并启动"}
             </button>
           </div>
         </form>

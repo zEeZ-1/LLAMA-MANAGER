@@ -73,6 +73,10 @@ def install_routes(app):
             ]
         }
 
+    @app.patch("/api/v1/workers/{identifier}")
+    async def edit_worker(identifier: str, body: WorkerConfig):
+        return await remote().edit_worker(identifier, body)
+
     @app.post("/api/v1/workers/{identifier}/deploy", status_code=202)
     async def deploy(identifier: str, body: DeployWorker):
         return await app.state.deployments.deploy(identifier, body)

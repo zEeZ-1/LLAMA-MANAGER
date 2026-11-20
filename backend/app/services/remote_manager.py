@@ -441,6 +441,41 @@ class RemoteManager:
         )
         return dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
 
+    async def edit_worker(self, identifier, body):
+        async with self.operations:
+            worker = self.worker(identifier)
+            await self.assert_idle([identifier])
+            if worker.get("release_id") or worker.get("imported"):
+                raise ManagerError(
+                    "worker_config_locked", "已部署或接管的 RPC 不能直接修改连接配置"
+                )
+            node = self.node(worker["node_id"])
+            available = {d["id"] for d in node.get("snapshot", {}).get("devices", [])}
+            if not set(body.device_ids) <= available:
+                raise ManagerError(
+                    "device_unavailable", "选择的设备已不存在，请刷新节点"
+                )
+            worker.update(
+                device_ids=body.device_ids,
+                endpoint={
+                    "host": node["address"],
+                    "port": body.port or self.cfg.rpc.default_port,
+                },
+                management_mode=body.mode,
+                controller_id=self.store.controller_id
+                if body.mode == "managed"
+                else None,
+                service_name=body.service_name
+                if body.mode == "observed"
+                else f"llama-manager-rpc-{identifier[:12]}.service",
+                state="unknown" if body.mode == "observed" else "uninstalled",
+                process_identity=None,
+                protocol_version=None,
+                last_error=None,
+            )
+            await self.store.put("workers", worker)
+            return self.public_worker(worker)
+
     async def refresh_worker(self, worker):
         data = await self.status(worker)
         pid = int(data.get("MainPID", "0"))
