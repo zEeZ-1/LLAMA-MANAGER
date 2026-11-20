@@ -1,0 +1,109 @@
+{
+  "checks": [
+    "password validation automatically displays existing RPC; optional key-install failure leaves connection and RPC usable with a warning",
+    "password reconnection repairs key bootstrap without losing discovered RPC",
+    "new RPC chooses a free port, deploys with live progress and appears alongside discovered service",
+    "placement exposes both RPC endpoints and replaces the previous selection for the same GPU",
+    "UI delete separately removes created RPC and discovered external RPC; node returns to no-running-RPC state"
+  ],
+  "page_errors": [],
+  "scope": "loopback test SSH machines; real OpenSSH and native CPU RPC; browser uses candidate static build",
+  "memory": {
+    "duration_seconds": 60.476994368000305,
+    "samples": 55,
+    "budget_bytes": 1073741824,
+    "passed": true,
+    "peak": {
+      "rss_bytes": 690888704,
+      "uss_bytes": 239362048,
+      "pss_bytes": 370211840,
+      "processes": [
+        {
+          "pid": 94600,
+          "name": "python",
+          "rss": 63389696,
+          "uss": 47464448,
+          "pss": 50659328
+        },
+        {
+          "pid": 98579,
+          "name": "ssh",
+          "rss": 7409664,
+          "uss": 1404928,
+          "pss": 2158592
+        },
+        {
+          "pid": 98655,
+          "name": "ssh",
+          "rss": 7290880,
+          "uss": 1302528,
+          "pss": 2055168
+        },
+        {
+          "pid": 98660,
+          "name": "ssh",
+          "rss": 7299072,
+          "uss": 1306624,
+          "pss": 2059264
+        },
+        {
+          "pid": 98407,
+          "name": "chrome-headless-shell",
+          "rss": 98480128,
+          "uss": 25780224,
+          "pss": 45301760
+        },
+        {
+          "pid": 98409,
+          "name": "chrome-headless-shell",
+          "rss": 41660416,
+          "uss": 528384,
+          "pss": 10694656
+        },
+        {
+          "pid": 98410,
+          "name": "chrome-headless-shell",
+          "rss": 41705472,
+          "uss": 569344,
+          "pss": 10714112
+        },
+        {
+          "pid": 98432,
+          "name": "chrome-headless-shell",
+          "rss": 71184384,
+          "uss": 11370496,
+          "pss": 25376768
+        },
+        {
+          "pid": 98471,
+          "name": "chrome-headless-shell",
+          "rss": 197148672,
+          "uss": 100446208,
+          "pss": 137089024
+        },
+        {
+          "pid": 98430,
+          "name": "chrome-headless-shell",
+          "rss": 110931968,
+          "uss": 24244224,
+          "pss": 55994368
+        },
+        {
+          "pid": 94599,
+          "name": "systemd-run",
+          "rss": 6545408,
+          "uss": 901120,
+          "pss": 1778688
+        },
+        {
+          "pid": 94585,
+          "name": "python",
+          "rss": 37842944,
+          "uss": 24043520,
+          "pss": 26330112
+        }
+      ],
+      "excluded_runtime_pids": []
+    }
+  }
+}

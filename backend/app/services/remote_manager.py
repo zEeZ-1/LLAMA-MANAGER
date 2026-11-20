@@ -10,6 +10,7 @@ from ..remote import scripts
 from ..remote.releases import ReleaseCatalog
 from ..runtime.rpc_probe import probe
 from .node_manager import INVENTORY_SCRIPT
+from .rpc_discovery import RpcDiscovery
 
 
 class RemoteManager:
@@ -30,6 +31,7 @@ class RemoteManager:
         self.local_provider = None
         self.retry = {}
         self.inventory_sampled = {}
+        self.discovery = RpcDiscovery(self)
 
     async def initialize(self):
         self.nodes = {r["id"]: r for r in await self.store.all("nodes")}
@@ -47,10 +49,17 @@ class RemoteManager:
 
     def worker(self, identifier):
         worker = self.workers.get(identifier)
-        if not worker:
+        if not worker or worker.get("deleted_at"):
             raise ManagerError("worker_missing", "RPC worker 不存在", 404)
         self.node(worker["node_id"])
         return worker
+
+    def node_workers(self, identifier):
+        return [
+            w
+            for w in self.workers.values()
+            if w["node_id"] == identifier and not w.get("deleted_at")
+        ]
 
     def public_worker(self, worker):
         return {
@@ -96,12 +105,12 @@ class RemoteManager:
             instance_count=0,
             ready_count=0,
             manager_memory_bytes=None,
-            rpc_workers=[
-                self.public_worker(w)
-                for w in self.workers.values()
-                if w["node_id"] == node["id"]
-            ],
+            rpc_workers=[self.public_worker(w) for w in self.node_workers(node["id"])],
             last_error=node.get("last_error"),
+            rpc_discovery=copy.deepcopy(
+                node.get("rpc_discovery", {"state": "pending", "error": None})
+            ),
+            auth_state=node.get("auth_state"),
         )
         data.setdefault("hostname", node["address"])
         data.setdefault("os", "尚未采集")
@@ -176,9 +185,16 @@ class RemoteManager:
     async def edit_node(self, identifier, body):
         async with self.operations:
             node = self.node(identifier)
-            ids = [w["id"] for w in self.workers.values() if w["node_id"] == identifier]
-            await self.assert_idle(ids)
+            ids = [w["id"] for w in self.node_workers(identifier)]
             changes = body.model_dump(exclude_unset=True, exclude_none=True)
+            if set(changes) == {"credential_id"}:
+                self.credentials.resolve(changes["credential_id"])
+                await self.ssh.close_node(identifier)
+                node["ssh"]["credential_id"] = changes["credential_id"]
+                node["connection_state"] = "unknown"
+                await self.save_node(node)
+                return self.public_node(node)
+            await self.assert_idle(ids)
             target_changed = any(
                 k in changes for k in ("address", "port", "username", "credential_id")
             )
@@ -211,20 +227,23 @@ class RemoteManager:
             node["ssh"].update(changes)
             if target_changed:
                 await self.ssh.close_node(identifier)
-                node["connection_state"] = "unknown"
+                node["connection_state"] = (
+                    "host_key_untrusted"
+                    if any(k in body.model_fields_set for k in ("address", "port"))
+                    else "unknown"
+                )
+                self.inventory_sampled.pop(identifier, None)
             await self.save_node(node)
             return self.public_node(node)
 
     async def archive_node(self, identifier):
         async with self.operations:
             node = self.node(identifier)
-            await self.assert_idle(
-                [w["id"] for w in self.workers.values() if w["node_id"] == identifier]
-            )
+            await self.assert_idle([w["id"] for w in self.node_workers(identifier)])
             if any(
                 w["node_id"] == identifier
                 and w["state"] not in {"stopped", "uninstalled"}
-                for w in self.workers.values()
+                for w in self.node_workers(identifier)
             ):
                 raise ManagerError("worker_running", "先停止并核实所属 RPC，再移除节点")
             await self.ssh.close_node(identifier)
@@ -279,10 +298,21 @@ class RemoteManager:
                 await self.assert_idle(
                     [
                         w["id"]
-                        for w in self.workers.values()
+                        for w in self.node_workers(identifier)
                         if w["node_id"] == identifier
                     ]
                 )
+            if body.replace_machine:
+                await self.assert_idle([w["id"] for w in self.node_workers(identifier)])
+                for worker in self.node_workers(identifier):
+                    worker.update(deleted_at=now(), state="replaced")
+                    await self.store.put("workers", worker)
+                node["identity"]["machine_id_hash"] = None
+                node["ssh"]["credential_id"] = None
+                node["snapshot"] = {}
+                node["rpc_discovery"] = {"state": "pending", "error": None}
+                node["auth_state"] = None
+                self.inventory_sampled.pop(identifier, None)
             await self.ssh.close_node(identifier)
             path = self.ssh.known_hosts(node)
             path.write_text(
@@ -306,6 +336,7 @@ class RemoteManager:
                 INVENTORY_SCRIPT.read_text(),
                 ["full" if full else "dynamic"],
                 password=password,
+                retry=True,
             )
             data = snapshot(parse_inventory(text), node["id"], node.get("snapshot"))
             machine = data["inventory"]["machine_id_hash"]
@@ -313,7 +344,7 @@ class RemoteManager:
             if previous and machine and previous != machine:
                 raise ManagerError(
                     "host_identity_changed",
-                    "远端系统身份发生变化，请重新登记并核验机器",
+                    "远端系统身份发生变化，请重新核验指纹并确认是否更换了机器",
                 )
             node["identity"]["machine_id_hash"] = machine
             node.update(snapshot=data, connection_state="online", last_error=None)
@@ -330,7 +361,14 @@ class RemoteManager:
             )
             node["connection_state"] = (
                 code
-                if code in {"auth_failed", "host_key_changed", "host_key_untrusted"}
+                if code
+                in {
+                    "auth_failed",
+                    "host_key_changed",
+                    "host_key_untrusted",
+                    "host_identity_changed",
+                    "credential_missing",
+                }
                 else "offline"
             )
             node["last_error"] = {
@@ -339,6 +377,10 @@ class RemoteManager:
                 if isinstance(detail, dict)
                 else "节点采集失败",
             }
+            if password:
+                node["last_error"]["message"] = node["last_error"]["message"].replace(
+                    password, "[redacted]"
+                )
             await self.save_node(node)
             raise
 
@@ -356,21 +398,59 @@ class RemoteManager:
                 if password is not None:
                     await self.ssh.close_node(identifier)
                 await self.collect(node, password)
+                node["auth_state"] = {
+                    "mode": "password" if password is not None else "key",
+                    "automatic": password is None,
+                    "warning": None,
+                }
+                await self.jobs.phase(
+                    job, "discovering_rpc", "SSH 认证成功，正在检测已有 RPC"
+                )
+                await self.discovery.safe_scan(node)
                 if password is not None:
                     await self.jobs.phase(
                         job, "installing_key", "正在安装本控制端专用公钥，密码不保存"
                     )
-                    credential = await self.credentials.generated()
-                    public = await self.credentials.public_key(credential["id"])
-                    await self.ssh.script(node, scripts.INSTALL_KEY, [public])
-                    node["ssh"]["credential_id"] = credential["id"]
-                    await self.save_node(node)
-                    await self.ssh.close_node(identifier)
-                    await self.jobs.phase(job, "verifying_key", "正在验证后续密钥连接")
-                    await self.collect(node)
-                for worker in self.workers.values():
-                    if worker["node_id"] == identifier and worker.get("service_name"):
-                        await self.refresh_worker(worker)
+                    previous = node["ssh"].get("credential_id")
+                    try:
+                        credential = None
+                        if previous:
+                            try:
+                                await self.ssh.verify_key(node)
+                            except ManagerError:
+                                pass
+                            else:
+                                credential = self.credentials.records[previous]
+                        if credential is None:
+                            credential = await self.credentials.generated()
+                            public = await self.credentials.public_key(credential["id"])
+                            await self.ssh.script(node, scripts.INSTALL_KEY, [public])
+                        candidate = {
+                            **node,
+                            "ssh": {**node["ssh"], "credential_id": credential["id"]},
+                        }
+                        await self.jobs.phase(
+                            job, "verifying_key", "RPC 检测完成，正在验证后续密钥连接"
+                        )
+                        await self.ssh.verify_key(candidate)
+                    except Exception:
+                        node["ssh"]["credential_id"] = previous
+                        node["auth_state"] = {
+                            "mode": "password",
+                            "automatic": False,
+                            "warning": "密码认证成功；自动密钥连接尚未配置完成，当前连接可用，断开后请重新输入密码",
+                        }
+                    else:
+                        node["ssh"]["credential_id"] = credential["id"]
+                        node["auth_state"] = {
+                            "mode": "key",
+                            "automatic": True,
+                            "warning": None,
+                        }
+                        await self.ssh.close_node(identifier)
+                        await self.collect(node)
+                self.retry.pop(identifier, None)
+                await self.save_node(node)
                 return self.public_node(node)
 
         return await self.jobs.submit(
@@ -382,9 +462,7 @@ class RemoteManager:
             async with self.operations:
                 node = self.node(identifier)
                 await self.collect(node)
-                for worker in self.workers.values():
-                    if worker["node_id"] == identifier and worker.get("service_name"):
-                        await self.refresh_worker(worker)
+                await self.discovery.safe_scan(node)
                 return self.public_node(node)
 
         self.node(identifier)
@@ -393,8 +471,19 @@ class RemoteManager:
     async def add_worker(self, identifier, body):
         async with self.operations:
             node = self.node(identifier)
-            if any(w["node_id"] == identifier for w in self.workers.values()):
-                raise ManagerError("worker_exists", "V2 每个节点登记一个 RPC worker")
+            if len(self.node_workers(identifier)) >= 16:
+                raise ManagerError("worker_limit", "每个节点最多登记 16 个 RPC")
+            port = (
+                body.port
+                or node.get("rpc_discovery", {}).get("suggested_port")
+                or self.cfg.rpc.default_port
+            )
+            if any(
+                w["endpoint"]["port"] == port for w in self.node_workers(identifier)
+            ):
+                raise ManagerError(
+                    "port_conflict", "此端口已有 RPC，请选择新端口或使用已有 RPC"
+                )
             available = {d["id"] for d in node.get("snapshot", {}).get("devices", [])}
             if not body.device_ids or not set(body.device_ids) <= available:
                 raise ManagerError(
@@ -407,7 +496,7 @@ class RemoteManager:
                 device_ids=body.device_ids,
                 endpoint={
                     "host": node["address"],
-                    "port": body.port or self.cfg.rpc.default_port,
+                    "port": port,
                 },
                 management_mode="observed" if body.mode == "observed" else "managed",
                 controller_id=self.store.controller_id
@@ -426,6 +515,8 @@ class RemoteManager:
                 runtime_commit=None,
                 expected_binary_sha256=None,
                 autostart=False,
+                origin="created",
+                deleted_at=None,
             )
             self.workers[wid] = worker
             await self.store.put("workers", worker)
@@ -433,11 +524,40 @@ class RemoteManager:
 
     async def status(self, worker):
         if not worker.get("service_name"):
+            if worker.get("origin") == "existing":
+                from ..remote.discovery import parse_discovery
+                from ..remote.rpc_scripts import DISCOVER
+
+                node = self.node(worker["node_id"])
+                found = parse_discovery(
+                    await self.ssh.script(node, DISCOVER, retry=True), node["address"]
+                )
+                process = next(
+                    (
+                        p
+                        for p in found["processes"]
+                        if p["port"] == worker["endpoint"]["port"]
+                    ),
+                    None,
+                )
+                if process:
+                    identity = process["process_identity"]
+                    return {
+                        "LoadState": "loaded",
+                        "ActiveState": "active",
+                        "MainPID": str(identity["pid"]),
+                        "ProcessStart": identity["start_time"],
+                        "BootID": identity["boot_id"],
+                        "Executable": process["executable_path"],
+                        "ExecutableSHA256": process["binary_sha256"],
+                        "RSSBytes": str(process["rss_bytes"]),
+                    }
             return {"LoadState": "not-found", "MainPID": "0", "ActiveState": "inactive"}
         text = await self.ssh.script(
             self.node(worker["node_id"]),
             scripts.SERVICE_STATUS,
             [worker["service_name"]],
+            retry=True,
         )
         return dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
 
@@ -455,6 +575,12 @@ class RemoteManager:
                 raise ManagerError(
                     "device_unavailable", "选择的设备已不存在，请刷新节点"
                 )
+            if any(
+                w["id"] != identifier
+                and w["endpoint"]["port"] == (body.port or self.cfg.rpc.default_port)
+                for w in self.node_workers(node["id"])
+            ):
+                raise ManagerError("port_conflict", "此端口已有其他 RPC")
             worker.update(
                 device_ids=body.device_ids,
                 endpoint={
@@ -514,6 +640,11 @@ class RemoteManager:
             }
         worker["process_identity"] = identity
         worker["rss_bytes"] = int(data.get("RSSBytes") or 0) if pid else 0
+        worker["usable"] = worker["state"] == "ready" and bool(
+            worker.get("protocol_version")
+        )
+        if not pid:
+            worker["client_count"] = 0
         if (
             old
             and identity
@@ -537,9 +668,12 @@ class RemoteManager:
                 "worker_not_managed", "此 RPC 尚未验证接管，不能启停或修改"
             )
         node = self.node(worker["node_id"])
+        await self.collect(node)
         if worker.get("imported"):
             data = await self.status(worker)
-            if data.get("ExecStart") != worker.get("service_signature"):
+            if worker.get("service_name") and data.get("ExecStart") != worker.get(
+                "service_signature"
+            ):
                 raise ManagerError(
                     "service_identity_changed", "关联服务的启动配置发生变化"
                 )
@@ -593,15 +727,24 @@ class RemoteManager:
         worker["last_compute_check_at"] = now()
         worker["last_error"] = None
         worker["state"] = "ready"
+        worker["client_count"] = 0
+        worker["usable"] = True
         await self.store.put("workers", worker)
         return result
 
     async def start_unlocked(self, worker):
         await self.assert_managed(worker)
         node = self.node(worker["node_id"])
-        await self.ssh.execute(
-            node, "systemctl --user start " + shlex.quote(worker["service_name"])
-        )
+        if worker.get("origin") == "existing":
+            await self.discovery.scan(node, verify=False)
+            if worker.get("client_count"):
+                raise ManagerError("rpc_in_use", "RPC 已被其他客户端占用")
+        if worker.get("service_name"):
+            await self.ssh.execute(
+                node, "systemctl --user start " + shlex.quote(worker["service_name"])
+            )
+        elif not worker.get("process_identity"):
+            raise ManagerError("rpc_not_running", "该外部 RPC 没有托管服务，请新建 RPC")
         deadline = time.monotonic() + self.cfg.rpc.startup_timeout_seconds
         while time.monotonic() < deadline:
             data = await self.refresh_worker(worker)
@@ -625,6 +768,7 @@ class RemoteManager:
         async def work(job):
             async with self.operations:
                 await self.assert_idle([identifier])
+                worker = self.worker(identifier)
                 await self.jobs.phase(
                     job,
                     operation,
@@ -638,6 +782,13 @@ class RemoteManager:
                 if operation == "start":
                     return await self.start_unlocked(worker)
                 if operation == "stop":
+                    if worker.get("origin") == "existing":
+                        await self.discovery.scan(node, verify=False)
+                        if worker.get("client_count"):
+                            raise ManagerError(
+                                "rpc_in_use",
+                                "此 RPC 有客户端连接，请先断开或确认删除该 RPC",
+                            )
                     await self.ssh.execute(
                         node,
                         "systemctl --user stop " + shlex.quote(worker["service_name"]),
@@ -663,7 +814,11 @@ class RemoteManager:
 
         await self.assert_idle([identifier])
         return await self.jobs.submit(
-            worker["node_id"], operation, work, idempotency_key=idempotency_key
+            worker["node_id"],
+            operation,
+            work,
+            idempotency_key=idempotency_key,
+            worker_id=identifier,
         )
 
     async def logs(self, identifier):
@@ -693,11 +848,7 @@ class RemoteManager:
                 try:
                     async with self.operations:
                         await self.collect(node, full=False)
-                        for worker in self.workers.values():
-                            if worker["node_id"] == node["id"] and worker.get(
-                                "service_name"
-                            ):
-                                await self.refresh_worker(worker)
+                        await self.discovery.safe_scan(node)
                         self.retry.pop(node["id"], None)
                 except Exception:
                     failures = min(self.retry.get(node["id"], (0, 0))[0] + 1, 8)

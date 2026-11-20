@@ -30,17 +30,25 @@ class JobManager:
         record.update(phase=phase, message=message, updated_at=now())
         await self.store.put("jobs", record)
 
-    async def submit(self, node_id, operation, work, secrets=(), idempotency_key=None):
+    async def submit(
+        self, node_id, operation, work, secrets=(), idempotency_key=None, worker_id=None
+    ):
         async with self.submit_lock:
             return await self._submit(
-                node_id, operation, work, secrets, idempotency_key
+                node_id, operation, work, secrets, idempotency_key, worker_id
             )
 
-    async def _submit(self, node_id, operation, work, secrets, idempotency_key):
+    async def _submit(
+        self, node_id, operation, work, secrets, idempotency_key, worker_id
+    ):
         if idempotency_key:
             for r in self.records.values():
                 if r.get("idempotency_key") == idempotency_key:
-                    if r["node_id"] != node_id or r["operation"] != operation:
+                    if (
+                        r["node_id"] != node_id
+                        or r["operation"] != operation
+                        or r.get("worker_id") != worker_id
+                    ):
                         raise ManagerError(
                             "idempotency_conflict", "重复操作标识已被其他任务使用"
                         )
@@ -48,8 +56,10 @@ class JobManager:
         for r in self.records.values():
             if (
                 r["id"] in self.tasks
+                and r["state"] in {"queued", "running"}
                 and r["node_id"] == node_id
                 and r["operation"] == operation
+                and r.get("worker_id") == worker_id
             ):
                 return r
         if len(self.tasks) >= self.cfg.ssh.max_pending_commands:
@@ -57,6 +67,7 @@ class JobManager:
         record = dict(
             id=str(uuid.uuid4()),
             node_id=node_id,
+            worker_id=worker_id,
             operation=operation,
             state="queued",
             phase="queued",

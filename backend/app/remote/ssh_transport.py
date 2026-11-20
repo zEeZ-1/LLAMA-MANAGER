@@ -120,7 +120,7 @@ class SshTransport:
             await asyncio.gather(discard(proc.stdout), discard(proc.stderr))
             await proc.wait()
 
-    def options(self, node):
+    def options(self, node, *, include_identity=True):
         result = [
             "-F",
             "/dev/null",
@@ -152,7 +152,7 @@ class SshTransport:
             "-o",
             "ServerAliveCountMax=2",
         ]
-        if self.credential_resolver:
+        if include_identity and self.credential_resolver:
             key = self.credential_resolver(node["ssh"].get("credential_id"))
             if key:
                 result += ["-i", str(key), "-o", "IdentitiesOnly=yes"]
@@ -251,7 +251,12 @@ class SshTransport:
                     "SSH 私有目录路径过长，请配置较短的 data/ssh 路径",
                 )
             previous = self.masters.get(node["id"])
-            if previous and previous["proc"].returncode is None:
+            if (
+                previous
+                and previous["proc"].returncode is None
+                and previous["path"].exists()
+                and password is None
+            ):
                 previous["used"] = time.monotonic()
                 return previous
             if previous:
@@ -264,9 +269,8 @@ class SshTransport:
                 if not idle:
                     raise ManagerError("ssh_pool_busy", "SSH 连接池忙，请稍后重试", 429)
                 await self._close(idle[0]["node_id"])
-            path = self.root / ("c-" + node["id"][:16])
-            path.unlink(missing_ok=True)
-            options = self.options(node)
+            path = self.root / ("c-" + node["id"][:12] + "-" + uuid.uuid4().hex[:8])
+            options = self.options(node, include_identity=password is None)
             options += [
                 "-o",
                 "BatchMode=no" if password is not None else "BatchMode=yes",
@@ -336,7 +340,9 @@ class SshTransport:
                     return await launch(env)
             return await launch()
 
-    async def execute(self, node, command, stdin=None, timeout=None, password=None):
+    async def execute(
+        self, node, command, stdin=None, timeout=None, password=None, retry=False
+    ):
         if self.pending >= self.cfg.ssh.max_pending_commands:
             raise ManagerError("ssh_queue_full", "SSH 任务队列已满", 429)
         self.pending += 1
@@ -345,36 +351,44 @@ class SshTransport:
                 self.slots,
                 self.node_locks.setdefault(node["id"], asyncio.Lock()),
             ):
-                master = await self._master(node, password)
-                master["active"] += 1
-                try:
-                    code, out, error = await self.run(
-                        [
-                            "ssh",
-                            *self.options(node),
-                            "-o",
-                            "BatchMode=yes",
-                            "-S",
-                            str(master["path"]),
-                            node["address"],
-                            command,
-                        ],
-                        stdin,
-                        timeout,
-                    )
-                    if code != 0:
-                        if code == 255:
-                            raise self.ssh_error(error)
-                        raise ManagerError(
-                            "remote_command_failed",
-                            (error or out or f"command exited {code}")[-1600:],
+                for attempt in range(2 if retry else 1):
+                    master = await self._master(node, password)
+                    master["active"] += 1
+                    try:
+                        code, out, error = await self.run(
+                            [
+                                "ssh",
+                                *self.options(node, include_identity=False),
+                                "-o",
+                                "BatchMode=yes",
+                                "-o",
+                                "ControlMaster=no",
+                                "-o",
+                                "ProxyCommand=false",
+                                "-S",
+                                str(master["path"]),
+                                node["address"],
+                                command,
+                            ],
+                            stdin,
+                            timeout,
                         )
-                    return out
-                except TimeoutError as exc:
-                    raise ManagerError("ssh_timeout", "远程命令执行超时") from exc
-                finally:
-                    master["active"] -= 1
-                    master["used"] = time.monotonic()
+                        if code == 0:
+                            return out
+                        if code != 255:
+                            raise ManagerError(
+                                "remote_command_failed",
+                                (error or out or f"command exited {code}")[-1600:],
+                            )
+                    except TimeoutError as exc:
+                        raise ManagerError("ssh_timeout", "远程命令执行超时") from exc
+                    finally:
+                        master["active"] -= 1
+                        master["used"] = time.monotonic()
+                    async with self.pool_lock:
+                        await self._close(node["id"])
+                    if attempt == (1 if retry else 0):
+                        raise self.ssh_error(error)
         finally:
             self.pending -= 1
 
@@ -397,6 +411,8 @@ class SshTransport:
                     str(node["ssh"]["port"]),
                     "-o",
                     "BatchMode=yes",
+                    "-o",
+                    "ProxyCommand=false",
                     "-o",
                     f"ControlPath={master['path']}",
                     "-o",
@@ -440,8 +456,29 @@ class SshTransport:
         entry["path"].unlink(missing_ok=True)
 
     async def close_node(self, node_id):
-        async with self.pool_lock:
+        async with self.node_locks.setdefault(node_id, asyncio.Lock()), self.pool_lock:
             await self._close(node_id)
+
+    async def verify_key(self, node):
+        async with self.slots:
+            code, out, error = await self.run(
+                [
+                    "ssh",
+                    *self.options(node),
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "ControlMaster=no",
+                    "-o",
+                    "ControlPath=none",
+                    "-o",
+                    "PreferredAuthentications=publickey",
+                    node["address"],
+                    "true",
+                ]
+            )
+            if code:
+                raise self.ssh_error(error)
 
     async def reap_idle(self):
         async with self.pool_lock:

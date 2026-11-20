@@ -55,22 +55,24 @@ export function CreateInstance() {
             label: `${node.name} · ${device.name}`,
           },
         ];
-      const worker = node.rpc_workers?.find(
-        (w) =>
-          w.management_mode === "managed" &&
-          w.state === "ready" &&
-          !w.claim &&
-          w.device_ids.includes(device.id),
+      const occupied = node.rpc_workers?.some(
+        (w) => (w.claim || w.client_count) && w.device_ids.includes(device.id),
       );
-      return worker
-        ? [
-            {
+      return occupied
+        ? []
+        : (node.rpc_workers || [])
+            .filter(
+              (w) =>
+                w.management_mode === "managed" &&
+                w.state === "ready" &&
+                !w.claim &&
+                w.device_ids.includes(device.id),
+            )
+            .map((worker) => ({
               device_id: device.id,
               worker_id: worker.id,
-              label: `${node.name} · ${device.name}`,
-            },
-          ]
-        : [];
+              label: `${node.name} · RPC ${worker.endpoint.port} · ${device.name}`,
+            }));
     }),
   );
   function setPlacement(devices: PlacementDevice[]) {
@@ -189,10 +191,15 @@ export function CreateInstance() {
               </p>
               {options.map((option) => {
                 const selected = placement.devices.find(
-                  (d) => d.device_id === option.device_id,
+                  (d) =>
+                    d.device_id === option.device_id &&
+                    d.worker_id === option.worker_id,
                 );
                 return (
-                  <div className="placement-option" key={option.device_id}>
+                  <div
+                    className="placement-option"
+                    key={`${option.device_id}:${option.worker_id || "local"}`}
+                  >
                     <label className="check">
                       <input
                         type="checkbox"
@@ -201,7 +208,9 @@ export function CreateInstance() {
                           setPlacement(
                             e.target.checked
                               ? [
-                                  ...placement.devices,
+                                  ...placement.devices.filter(
+                                    (d) => d.device_id !== option.device_id,
+                                  ),
                                   {
                                     device_id: option.device_id,
                                     worker_id: option.worker_id,
@@ -228,7 +237,13 @@ export function CreateInstance() {
                 <div className="placement-option" key={item.device_id}>
                   <span>
                     {index + 1}.{" "}
-                    {options.find((o) => o.device_id === item.device_id)?.label}
+                    {
+                      options.find(
+                        (o) =>
+                          o.device_id === item.device_id &&
+                          o.worker_id === item.worker_id,
+                      )?.label
+                    }
                   </span>
                   <input
                     aria-label={`设备 ${index + 1} 分配权重`}

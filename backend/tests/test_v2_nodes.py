@@ -14,6 +14,73 @@ from backend.app.services.job_manager import JobManager
 from backend.app.services.resource_manager import ResourceManager
 
 
+def test_failed_job_can_be_retried_while_its_final_record_is_persisting(cfg):
+    async def run():
+        entered, release = asyncio.Event(), asyncio.Event()
+        store = AsyncMock()
+
+        async def put(table, record):
+            if record["state"] == "failed":
+                entered.set()
+                await release.wait()
+
+        store.put.side_effect = put
+        jobs = JobManager(store, cfg)
+
+        async def fail(identifier):
+            raise ManagerError("qa_failure", "failed")
+
+        async def succeed(identifier):
+            return {"ok": True}
+
+        first = await jobs.submit("node", "connect", fail)
+        await asyncio.wait_for(entered.wait(), 2)
+        try:
+            second = await jobs.submit("node", "connect", succeed)
+            assert second["id"] != first["id"]
+            release.set()
+            await asyncio.gather(*list(jobs.tasks.values()))
+            assert second["state"] == "completed"
+        finally:
+            release.set()
+            await jobs.close()
+
+    asyncio.run(run())
+
+
+def test_worker_jobs_are_deduplicated_per_rpc_not_per_node(cfg):
+    async def run():
+        store = AsyncMock()
+        jobs = JobManager(store, cfg)
+        release = asyncio.Event()
+
+        async def work(identifier):
+            await release.wait()
+
+        try:
+            first = await jobs.submit("node", "delete_rpc", work, worker_id="rpc-a")
+            retry = await jobs.submit("node", "delete_rpc", work, worker_id="rpc-a")
+            second = await jobs.submit("node", "delete_rpc", work, worker_id="rpc-b")
+            assert first["id"] == retry["id"]
+            assert first["id"] != second["id"]
+            assert second["worker_id"] == "rpc-b"
+            keyed = await jobs.submit(
+                "node", "start", work, worker_id="rpc-a", idempotency_key="click"
+            )
+            assert keyed["worker_id"] == "rpc-a"
+            with pytest.raises(ManagerError) as error:
+                await jobs.submit(
+                    "node", "start", work, worker_id="rpc-b", idempotency_key="click"
+                )
+            assert error.value.code == "idempotency_conflict"
+        finally:
+            release.set()
+            await asyncio.gather(*list(jobs.tasks.values()))
+            await jobs.close()
+
+    asyncio.run(run())
+
+
 def test_repositories_close_short_lived_connections_without_gc(cfg):
     async def run():
         repo = InstanceRepository(cfg.storage.database)

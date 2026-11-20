@@ -29,6 +29,18 @@ export interface Node {
   inventory?: Record<string, unknown>;
   last_error?: { code: string; message: string } | null;
   rpc_workers?: Worker[];
+  rpc_discovery?: {
+    state: string;
+    count?: number;
+    sampled_at?: string;
+    suggested_port?: number | null;
+    error?: { code: string; message: string } | null;
+  };
+  auth_state?: {
+    mode: string;
+    automatic: boolean;
+    warning?: string | null;
+  } | null;
   os: string;
   architecture: string;
   cpu_info: {
@@ -144,10 +156,19 @@ export interface Worker {
   claim?: { instance_id: string; state: string } | null;
   last_error?: { code: string; message: string } | null;
   rss_bytes?: number;
+  origin?: "existing" | "created";
+  usable?: boolean;
+  client_count?: number;
+  bind_address?: string;
+  can_delete?: boolean;
+  can_start?: boolean;
+  device_names?: string[] | null;
+  service_scope?: string;
 }
 export interface Job {
   id: string;
   node_id: string;
+  worker_id?: string | null;
   operation: string;
   state: string;
   phase: string;

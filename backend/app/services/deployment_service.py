@@ -18,6 +18,7 @@ class DeploymentService:
 
         async def work(job):
             async with self.slot, remote.operations:
+                worker = remote.worker(identifier)
                 await remote.assert_idle([identifier])
                 if worker.get("imported") or worker["management_mode"] != "managed":
                     raise ManagerError(
@@ -234,7 +235,11 @@ class DeploymentService:
 
         await remote.assert_idle([identifier])
         return await remote.jobs.submit(
-            worker["node_id"], "deploy", work, secrets=[secret] if secret else []
+            worker["node_id"],
+            "deploy",
+            work,
+            secrets=[secret] if secret else [],
+            worker_id=identifier,
         )
 
     async def adopt(self, identifier, body):
@@ -243,6 +248,7 @@ class DeploymentService:
 
         async def work(job):
             async with remote.operations:
+                worker = remote.worker(identifier)
                 await remote.assert_idle([identifier])
                 if worker["management_mode"] != "observed" or not worker.get(
                     "service_name"
@@ -280,4 +286,6 @@ class DeploymentService:
                 await remote.store.put("workers", worker)
                 return remote.public_worker(worker)
 
-        return await remote.jobs.submit(worker["node_id"], "adopt", work)
+        return await remote.jobs.submit(
+            worker["node_id"], "adopt", work, worker_id=identifier
+        )

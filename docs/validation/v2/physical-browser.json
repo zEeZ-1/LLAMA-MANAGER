@@ -1,0 +1,20 @@
+{
+  "scope": "read-only UI on deployed control app; remote services unchanged",
+  "page_errors": [],
+  "nodes": [
+    {
+      "address": "192.168.50.12",
+      "rpc_state": "\u6b63\u5728\u4f7f\u7528"
+    },
+    {
+      "address": "192.168.50.11",
+      "rpc_state": "\u6b63\u5728\u4f7f\u7528"
+    }
+  ],
+  "checks": [
+    "both real RPCs displayed with actual ready/busy state; ordinary stop disabled while busy",
+    "historical node-level deployment error does not appear on current RPC cards",
+    "new RPC defaults to free port 50053; modal cancelled without creating resources"
+  ],
+  "mobile_no_overflow": true
+}

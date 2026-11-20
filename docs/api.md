@@ -102,6 +102,7 @@ Chat：
 | GET | `/nodes/{id}/workers` | worker 列表及 claim 占用 |
 | POST | `/nodes/{id}/workers` | device_ids/port/mode；observed 模式还需 service_name |
 | PATCH | `/workers/{id}` | 部署前修改完整 WorkerConfig（device_ids/port/mode/service_name）；拒绝有占用、已部署或已接管的 worker |
+| DELETE | `/workers/{id}` | 202，删除指定 RPC；可提交 process_identity 与 force，核对身份后停止 / 移除，拒绝受管实例占用 |
 | GET | `/releases` | 控制端发布清单的公开部分 |
 | POST | `/workers/{id}/deploy` | release_id/enable_linger/sudo_password/start/autostart；默认 start:true、autostart:false |
 | POST | `/workers/{id}/adopt` | 指定 release_id，验证正在运行的外部服务后接管 |
@@ -119,3 +120,14 @@ Chat：
 统一 Node 新增 connection_state、role、hardware_model、inventory、telemetry、rpc_workers；指标包含 status/source/sampled_at/stale。设备包含 memory_kind(shared/dedicated/unknown) 和 compute_state；memory_total/free:null 表示缺失或共享内存，不代表 GPU 不可计算。GET /nodes 使用缓存，不进行远端 SSH。GET /health 的 managed_lifecycle 表示是否使用默认系统托管入口，ssh_connections 为当前池大小。
 
 远端错误为 `detail:{code,message}`，如 auth_failed、host_key_changed、unsupported_platform、checksum_mismatch、service_identity_changed、worker_busy、node_operation_busy。部分旧接口错误仍为字符串，客户端同时兼容两者。
+
+RPC 操作任务返回 worker_id，去重范围为节点、操作和具体 RPC；不同 RPC 的任务互不替代。同一个 idempotency_key 不能跨 RPC 复用。旧历史任务可能没有 worker_id，只展示于节点最近任务列表。
+
+
+节点连接 / 手动刷新现在自动执行 RPC 发现，日常轮询也刷新发现结果。`Node.rpc_discovery` 包含 state/count/sampled_at/suggested_port/listening_ports/error；`Node.auth_state` 区分已成功的 password/key 认证、automatic 是否可自动复连及可选 warning。专用密钥配置失败不会覆盖密码认证成功和已发现 RPC 的结果。
+
+发现的 worker 新增 origin(existing/created)、usable、client_count、can_delete、can_start、service_scope 和设备选择。已知发布包二进制摘要、设备和协议匹配的空闲 RPC 自动关联可用，已有客户端连接时跳过协议探测，未匹配版本仍显示为 unverified。一个节点最多登记 16 个活动 RPC，端口不能重复；不提交新建端口时选择发现结果中的空闲建议端口。
+
+DELETE /workers/{id} 支持 `{process_identity:{pid,start_time,boot_id},force:false}`；即使 process_identity 显式为 null，也不能误删后来启动的新进程。force 只允许已确认中断外部连接，不能绕过本平台实例 claim、账户权限、进程 / 服务身份检查。删除保留历史元数据，发现外部 RPC 时保留程序文件；系统级 / 其他账户服务只显示权限限制。
+
+`POST /nodes/{id}/host-key/trust` 新增 replace_machine:true，用户明确确认同 IP 换机后，核查无资源占用，归档旧 worker、清除机器身份 / 凭据引用，保留历史，再执行新密码登录。replace:true 仍只表示同意更换 SSH 主机密钥，不隐式删除旧 RPC 绑定。默认端口 22 使用裸 IP 的受信记录，其他端口用 [IP]:port。

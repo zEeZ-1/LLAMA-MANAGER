@@ -7,6 +7,7 @@ from ..schemas.nodes import (
     WorkerConfig,
     DeployWorker,
     JobOperation,
+    RemoveWorker,
 )
 
 
@@ -56,8 +57,7 @@ def install_routes(app):
         return {
             "workers": [
                 {**remote().public_worker(w), "claim": claims.get(w["id"])}
-                for w in remote().workers.values()
-                if w["node_id"] == identifier
+                for w in remote().node_workers(identifier)
             ]
         }
 
@@ -76,6 +76,10 @@ def install_routes(app):
     @app.patch("/api/v1/workers/{identifier}")
     async def edit_worker(identifier: str, body: WorkerConfig):
         return await remote().edit_worker(identifier, body)
+
+    @app.delete("/api/v1/workers/{identifier}", status_code=202)
+    async def remove_worker(identifier: str, body: RemoveWorker):
+        return await remote().discovery.remove(identifier, body)
 
     @app.post("/api/v1/workers/{identifier}/deploy", status_code=202)
     async def deploy(identifier: str, body: DeployWorker):

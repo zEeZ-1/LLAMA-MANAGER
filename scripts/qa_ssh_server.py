@@ -5,12 +5,14 @@ Requires asyncssh in a QA environment; never installed or used on production nod
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import json
 import os
 from pathlib import Path
 import shlex
 import signal
+import shutil
 import time
 import asyncssh
 
@@ -105,6 +107,70 @@ class Machine:
                 proc.kill()
                 await proc.wait()
 
+    async def connections(self, port):
+        proc = await asyncio.create_subprocess_exec(
+            "ss",
+            "-tnpH",
+            "state",
+            "established",
+            f"( src {self.address} and sport = :{port} )",
+            stdout=asyncio.subprocess.PIPE,
+        )
+        output, _ = await proc.communicate()
+        return output.decode()
+
+    async def discover(self):
+        def encoded(value):
+            return base64.b64encode(value.encode()).decode()
+
+        lines = ["boot\tqa-boot", "uid\t2002"]
+        alive = [
+            (unit, info)
+            for unit, info in self.units.items()
+            if info.get("proc") and info["proc"].returncode is None
+        ]
+        for unit, info in alive:
+            pid = info["proc"].pid
+            lines.append(
+                f'listen\tLISTEN 0 1 {self.address}:{info["port"]} 0.0.0.0:* users:(("ggml-rpc-server",pid={pid},fd=3))'
+            )
+            for line in (await self.connections(info["port"])).splitlines():
+                lines.append("connection\t" + line)
+        for unit, info in alive:
+            pid = info["proc"].pid
+            start = Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1].split()[19]
+            group = "0::/user.slice/user-2002.slice/user@2002.service/app.slice/" + unit
+            argv = (
+                "\0".join(
+                    [
+                        str(self.binary),
+                        "--host",
+                        self.address,
+                        "--port",
+                        str(info["port"]),
+                        "--device",
+                        "CUDA0",
+                    ]
+                )
+                + "\0"
+            )
+            lines.append(
+                "\t".join(
+                    [
+                        "process",
+                        str(pid),
+                        start,
+                        "2002",
+                        "40000000",
+                        encoded(str(self.binary)),
+                        self.binary_sha,
+                        encoded(group),
+                        encoded(argv),
+                    ]
+                )
+            )
+        return "\n".join(lines) + "\n"
+
     async def handle(self, process):
         command = process.command or ""
         content = await process.stdin.read()
@@ -113,7 +179,36 @@ class Machine:
             args = shlex.split(command)
             if command.startswith("sh -s --"):
                 values = args[3:]
-                if "# LIM_OP install_key" in content:
+                if "# LIM_OP discover_rpc" in content:
+                    out = await self.discover()
+                elif "# LIM_OP remove_external_rpc" in content:
+                    pid, start, boot, digest, unit, signature, force = values
+                    info = self.units.get(unit)
+                    if not info:
+                        raise RuntimeError("rpc_identity_changed")
+                    if (
+                        info.get("proc")
+                        and info["proc"].returncode is None
+                        and str(info["proc"].pid) != pid
+                    ):
+                        raise RuntimeError("rpc_identity_changed")
+                    if (
+                        force != "yes"
+                        and (await self.connections(info["port"])).strip()
+                    ):
+                        raise RuntimeError("rpc_in_use")
+                    await self.stop(unit)
+                    self.units.pop(unit)
+                elif "# LIM_OP uninstall_rpc" in content:
+                    root, unit, owner = values
+                    if (self.home / root / "owner").read_text() != owner:
+                        raise RuntimeError("owner mismatch")
+                    await self.stop(unit)
+                    self.units.pop(unit, None)
+                    shutil.rmtree(self.home / root)
+                elif "# LIM_OP install_key" in content:
+                    if (self.home / "deny-key-install").exists():
+                        raise RuntimeError("QA public key installation refused")
                     self.keys.add(
                         " ".join(
                             asyncssh.import_public_key(values[0])
@@ -195,6 +290,14 @@ class Machine:
                 await self.start(args[3])
             elif args[:3] == ["systemctl", "--user", "stop"]:
                 await self.stop(args[3])
+            elif args == ["true"]:
+                pass
+            elif (
+                args[:2] == ["sha256sum", "--"]
+                and len(args) == 3
+                and args[2] == str(self.binary)
+            ):
+                out = self.binary_sha + "  " + str(self.binary) + "\n"
             elif args[:3] in (
                 ["systemctl", "--user", "enable"],
                 ["systemctl", "--user", "disable"],
@@ -262,10 +365,17 @@ async def main(args):
             f"127.0.0.{suffix}", args.root / f"node-{suffix}", args.binary.resolve()
         )
         machines.append(machine)
+        if args.prestart_rpc:
+            machine.units["existing-rpc.service"] = {
+                "port": args.rpc_port_base + suffix - args.start,
+                "owner": "qa-existing",
+                "root": "existing",
+            }
+            await machine.start("existing-rpc.service")
         listener = await asyncssh.create_server(
             lambda m=machine: SSHServer(m),
             machine.address,
-            0,
+            args.ssh_port,
             server_host_keys=[machine.server_key],
             process_factory=machine.handle,
             sftp_factory=lambda chan, m=machine: QASFTPServer(chan, chroot=str(m.home)),
@@ -315,6 +425,9 @@ if __name__ == "__main__":
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--start", type=int, default=2)
     parser.add_argument("--count", type=int, default=3)
+    parser.add_argument("--prestart-rpc", action="store_true")
+    parser.add_argument("--rpc-port-base", type=int, default=19060)
+    parser.add_argument("--ssh-port", type=int, default=0)
     args = parser.parse_args()
     args.root.mkdir(parents=True, exist_ok=True)
     asyncio.run(main(args))

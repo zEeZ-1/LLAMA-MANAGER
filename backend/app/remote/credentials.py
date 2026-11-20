@@ -70,11 +70,13 @@ class CredentialStore:
         return record
 
     async def generated(self):
-        existing = next(
-            (r for r in self.records.values() if r["type"] == "generated"), None
-        )
-        if existing:
-            return existing
+        for existing in (r for r in self.records.values() if r["type"] == "generated"):
+            try:
+                self.resolve(existing["id"])
+            except ManagerError:
+                pass
+            else:
+                return existing
         from ..schemas.nodes import AddCredential
 
         return await self.create(AddCredential())

@@ -1,0 +1,89 @@
+{
+  "scope": "read-only discovery and fresh key login on two real Orin nodes; no remote services created, stopped or deleted",
+  "nodes": [
+    {
+      "address": "192.168.50.12",
+      "connection_state": "online",
+      "job_state": "completed",
+      "job_error": null,
+      "rpc_discovery": {
+        "state": "complete",
+        "sampled_at": "2026-11-20T10:59:33.815364+00:00",
+        "count": 1,
+        "suggested_port": 50053,
+        "listening_ports": [
+          22,
+          53,
+          5201,
+          6566,
+          50052
+        ],
+        "error": null
+      },
+      "workers": [
+        {
+          "id": "099a686a-7651-428a-93b8-056b9835315f",
+          "origin": "existing",
+          "endpoint": {
+            "host": "192.168.50.12",
+            "port": 50052
+          },
+          "service_name": "llama-rpc-worker.service",
+          "state": "ready",
+          "usable": true,
+          "protocol_version": "10.0.0",
+          "process_identity": {
+            "pid": 11076,
+            "start_time": "7751908",
+            "boot_id": "e3ea2787-2cde-44db-883f-bc3b38cc6eaf"
+          },
+          "client_count": 0,
+          "can_delete": true,
+          "last_error": null
+        }
+      ]
+    },
+    {
+      "address": "192.168.50.11",
+      "connection_state": "online",
+      "job_state": "completed",
+      "job_error": null,
+      "rpc_discovery": {
+        "state": "complete",
+        "sampled_at": "2026-11-20T10:59:34.561765+00:00",
+        "count": 1,
+        "suggested_port": 50053,
+        "listening_ports": [
+          22,
+          53,
+          5201,
+          6566,
+          50052
+        ],
+        "error": null
+      },
+      "workers": [
+        {
+          "id": "b626cd44-64e0-406f-a69c-47ab0000cdf3",
+          "origin": "existing",
+          "endpoint": {
+            "host": "192.168.50.11",
+            "port": 50052
+          },
+          "service_name": "llama-rpc-worker.service",
+          "state": "ready",
+          "usable": true,
+          "protocol_version": "10.0.0",
+          "process_identity": {
+            "pid": 10954,
+            "start_time": "7751890",
+            "boot_id": "08d3de9c-a53c-465e-8b77-cdde14b27e6c"
+          },
+          "client_count": 0,
+          "can_delete": true,
+          "last_error": null
+        }
+      ]
+    }
+  ]
+}

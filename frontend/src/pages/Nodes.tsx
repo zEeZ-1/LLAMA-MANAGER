@@ -31,6 +31,8 @@ const connectionNames: Record<string, string> = {
   auth_failed: "认证失败",
   host_key_changed: "主机身份变化",
   host_key_untrusted: "待核验主机",
+  host_identity_changed: "机器身份变化",
+  credential_missing: "需要密码登录",
   connecting: "连接中",
 };
 const workerNames: Record<string, string> = {
@@ -42,6 +44,8 @@ const workerNames: Record<string, string> = {
   stopping: "停止中",
   failed: "失败",
   unknown: "待核对",
+  unverified: "待验证",
+  busy: "正在使用",
 };
 const jobNames: Record<string, string> = {
   completed: "完成",
@@ -59,6 +63,7 @@ const operationNames: Record<string, string> = {
   stop: "停止 RPC",
   clean: "清理缓存",
   reconcile: "核对占用",
+  delete_rpc: "删除 RPC",
 };
 
 export function Nodes() {
@@ -107,12 +112,19 @@ export function Nodes() {
   const workerJobs = new Map<string, Job>();
   for (const job of jobs.data?.jobs || []) {
     if (
-      ["deploy", "adopt", "start", "stop", "clean", "reconcile"].includes(
-        job.operation,
-      ) &&
-      !workerJobs.has(job.node_id)
+      [
+        "deploy",
+        "adopt",
+        "start",
+        "stop",
+        "clean",
+        "reconcile",
+        "delete_rpc",
+      ].includes(job.operation) &&
+      job.worker_id &&
+      !workerJobs.has(job.worker_id)
     )
-      workerJobs.set(job.node_id, job);
+      workerJobs.set(job.worker_id, job);
   }
   return (
     <>
@@ -206,6 +218,28 @@ export function Nodes() {
             {node.last_error && (
               <div className="error">{node.last_error.message}</div>
             )}
+            {node.auth_state?.warning && (
+              <div className="notice">{node.auth_state.warning}</div>
+            )}
+            {node.role === "rpc_worker" && (
+              <div className="notice" role="status">
+                {node.rpc_discovery?.state === "complete"
+                  ? node.rpc_discovery.count
+                    ? `已检测到 ${node.rpc_discovery.count} 个运行中的 RPC`
+                    : "未检测到运行中的 RPC，可新建 RPC"
+                  : node.rpc_discovery?.error?.message ||
+                    "SSH 连接成功后会自动检测 RPC"}
+                {node.rpc_discovery?.sampled_at && (
+                  <small>
+                    {" "}
+                    ·{" "}
+                    {new Date(
+                      node.rpc_discovery.sampled_at,
+                    ).toLocaleTimeString()}
+                  </small>
+                )}
+              </div>
+            )}
             {details === node.id && (
               <dl className="details">
                 <dt>硬件型号</dt>
@@ -275,9 +309,19 @@ export function Nodes() {
                   </span>
                 </div>
                 <p className="muted">
-                  {worker.release_id || "尚无验证发布"} · 协议{" "}
+                  {worker.origin === "existing"
+                    ? "检测到的已有 RPC"
+                    : "平台新建 RPC"}{" "}
+                  · {worker.service_name || "独立进程"} ·{" "}
+                  {worker.release_id || "版本未验证"} · 协议{" "}
                   {worker.protocol_version || "待核验"} · RSS{" "}
                   {bytes(worker.rss_bytes)}
+                  {worker.process_identity && (
+                    <> · PID {worker.process_identity.pid}</>
+                  )}
+                  {worker.client_count ? (
+                    <> · {worker.client_count} 个连接</>
+                  ) : null}
                 </p>
                 {worker.claim && (
                   <div className="notice">
@@ -290,9 +334,9 @@ export function Nodes() {
                 {worker.last_error && (
                   <div className="error">{worker.last_error.message}</div>
                 )}
-                <WorkerJobStatus job={workerJobs.get(node.id)} />
+                <WorkerJobStatus job={workerJobs.get(worker.id)} />
                 <div className="row-actions worker-actions">
-                  {!worker.release_id && (
+                  {!worker.release_id && worker.origin !== "existing" && (
                     <button
                       className="small"
                       disabled={working || !!worker.claim}
@@ -301,22 +345,25 @@ export function Nodes() {
                       修改 RPC 配置
                     </button>
                   )}
-                  <button
-                    className="small"
-                    disabled={working || !!worker.claim}
-                    onClick={() => setDeployment(worker)}
-                  >
-                    {worker.management_mode === "observed"
-                      ? "验证并接管"
-                      : "部署 / 更新"}
-                  </button>
+                  {worker.origin !== "existing" && (
+                    <button
+                      className="small"
+                      disabled={working || !!worker.claim}
+                      onClick={() => setDeployment(worker)}
+                    >
+                      {worker.management_mode === "observed"
+                        ? "验证并接管"
+                        : "部署 / 更新"}
+                    </button>
+                  )}
                   <button
                     className="small"
                     disabled={
                       working ||
                       !!worker.claim ||
                       !worker.release_id ||
-                      worker.management_mode !== "managed"
+                      worker.management_mode !== "managed" ||
+                      worker.can_start === false
                     }
                     onClick={() =>
                       void action(() =>
@@ -338,7 +385,9 @@ export function Nodes() {
                       working ||
                       !!worker.claim ||
                       worker.management_mode !== "managed" ||
-                      !worker.release_id
+                      !worker.release_id ||
+                      worker.state === "busy" ||
+                      !worker.service_name
                     }
                     onClick={() =>
                       void action(() =>
@@ -398,6 +447,33 @@ export function Nodes() {
                         清理缓存
                       </button>
                     )}
+                  <button
+                    className="small danger"
+                    disabled={
+                      working || !!worker.claim || worker.can_delete === false
+                    }
+                    onClick={() => {
+                      const message =
+                        worker.origin === "existing"
+                          ? `删除 ${worker.endpoint.host}:${worker.endpoint.port} 的 RPC？将停止并停用对应服务，外部程序文件保留。${worker.client_count ? `当前有 ${worker.client_count} 个连接，会被断开。` : ""}`
+                          : worker.release_id
+                            ? `删除 ${worker.endpoint.host}:${worker.endpoint.port} 的 RPC？将停止服务并删除其专属程序和缓存，模型源文件保留。`
+                            : "删除此尚未部署的 RPC 配置？";
+                      if (window.confirm(message))
+                        void action(() =>
+                          api(`/workers/${worker.id}`, {
+                            method: "DELETE",
+                            body: JSON.stringify({
+                              process_identity: worker.process_identity,
+                              force: !!worker.client_count,
+                            }),
+                          }),
+                        );
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    删除 RPC
+                  </button>
                 </div>
               </div>
             ))}
@@ -432,16 +508,16 @@ export function Nodes() {
                   >
                     <RefreshCw size={16} />
                   </button>
-                  {!node.rpc_workers?.length && (
+                  {
                     <button
                       className="primary"
                       disabled={node.connection_state !== "online"}
                       onClick={() => setWorkerNode(node)}
                     >
                       <Plus size={15} />
-                      配置 RPC
+                      新建 RPC
                     </button>
-                  )}
+                  }
                   <button
                     className="icon danger"
                     disabled={working}
@@ -520,8 +596,9 @@ export function Nodes() {
         <WorkerModal
           node={workerNode}
           onClose={() => setWorkerNode(null)}
-          onDone={() => {
+          onDone={(saved) => {
             setWorkerNode(null);
+            if (saved) setDeployment(saved);
             refresh();
           }}
         />
@@ -724,7 +801,13 @@ function ConnectModal({
   const [username, setUsername] = useState(existing?.ssh?.username || "");
   const [port, setPort] = useState(existing?.ssh?.port || 22);
   const [mode, setMode] = useState<"password" | "key">(
-    existing?.ssh?.credential_id ? "key" : "password",
+    existing?.ssh?.credential_id &&
+      existing?.auth_state?.automatic !== false &&
+      !["auth_failed", "credential_missing"].includes(
+        existing?.connection_state || "",
+      )
+      ? "key"
+      : "password",
   );
   const [password, setPassword] = useState("");
   const [credential, setCredential] = useState(
@@ -739,6 +822,28 @@ function ConnectModal({
   const [trusted, setTrusted] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [replaceMachine, setReplaceMachine] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const job = useQuery({
+    queryKey: ["connection-job", jobId],
+    enabled: !!jobId,
+    queryFn: () => api<Job>(`/jobs/${jobId}`),
+    refetchInterval: (q) =>
+      ["completed", "failed", "interrupted"].includes(q.state.data?.state || "")
+        ? false
+        : 1000,
+  });
+  const connecting =
+    !!jobId &&
+    !["completed", "failed", "interrupted"].includes(job.data?.state || "");
+  const failure =
+    error ||
+    job.data?.error?.message ||
+    (job.error ? "连接进度暂时不可用，正在重试" : "");
+  useEffect(() => {
+    if (job.data?.state === "completed") onDone();
+  }, [job.data?.state, onDone]);
+
   const credentials = useQuery({
     queryKey: ["credentials"],
     queryFn: () =>
@@ -750,6 +855,7 @@ function ConnectModal({
   async function scan() {
     setBusy(true);
     setError("");
+    setJobId(null);
     try {
       let target = node;
       if (!target) {
@@ -788,20 +894,21 @@ function ConnectModal({
     if (!node) return;
     setBusy(true);
     setError("");
+    setJobId(null);
     try {
       if (credential && credential !== node.ssh?.credential_id)
         await api(`/nodes/${node.id}`, {
           method: "PATCH",
           body: JSON.stringify({ credential_id: credential }),
         });
-      await api(`/nodes/${node.id}/connect`, {
+      const submitted = await api<Job>(`/nodes/${node.id}/connect`, {
         method: "POST",
         body: JSON.stringify({
           password: mode === "password" ? password : null,
         }),
       });
       setPassword("");
-      onDone();
+      setJobId(submitted.id);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -812,6 +919,7 @@ function ConnectModal({
     if (!node || !challenge || !trusted) return;
     setBusy(true);
     setError("");
+    setJobId(null);
     try {
       const changed =
         !!challenge.current_fingerprint &&
@@ -823,23 +931,25 @@ function ConnectModal({
         )
       )
         return;
-      await api(`/nodes/${node.id}/host-key/trust`, {
+      const confirmed = await api<Node>(`/nodes/${node.id}/host-key/trust`, {
         method: "POST",
         body: JSON.stringify({
           challenge_id: challenge.challenge_id,
           fingerprint,
           replace: changed,
+          replace_machine: replaceMachine,
         }),
       });
+      setNode(confirmed);
       setChallenge(null);
-      await api(`/nodes/${node.id}/connect`, {
+      const submitted = await api<Job>(`/nodes/${node.id}/connect`, {
         method: "POST",
         body: JSON.stringify({
           password: mode === "password" ? password : null,
         }),
       });
       setPassword("");
-      onDone();
+      setJobId(submitted.id);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -891,9 +1001,11 @@ function ConnectModal({
             void (challenge
               ? connect()
               : node?.identity?.ssh_host_key_fingerprint &&
-                  !["host_key_changed", "host_key_untrusted"].includes(
-                    node.connection_state,
-                  )
+                  ![
+                    "host_key_changed",
+                    "host_key_untrusted",
+                    "host_identity_changed",
+                  ].includes(node.connection_state)
                 ? connectKnown()
                 : scan());
           }}
@@ -953,7 +1065,7 @@ function ConnectModal({
               value={mode}
               onChange={(e) => setMode(e.target.value as typeof mode)}
             >
-              <option value="password">首次密码登录</option>
+              <option value="password">密码登录</option>
               <option value="key">已登记密钥 / 本机 agent</option>
             </select>
           </label>
@@ -1040,6 +1152,22 @@ function ConnectModal({
                 </select>
               </label>
               <code>{fingerprint}</code>
+              {!!challenge.current_fingerprint && (
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={replaceMachine}
+                    onChange={(e) => {
+                      setReplaceMachine(e.target.checked);
+                      if (e.target.checked) {
+                        setMode("password");
+                        setCredential("");
+                      }
+                    }}
+                  />
+                  此 IP 已更换为新机器，清除旧机器的 RPC 绑定后接入
+                </label>
+              )}
               <label className="check">
                 <input
                   type="checkbox"
@@ -1050,26 +1178,34 @@ function ConnectModal({
               </label>
             </div>
           )}
-          {error && (
+          {connecting && (
+            <div className="notice" role="status">
+              {job.data?.message || "正在验证 SSH 连接并检测 RPC…"}
+              。关闭窗口后任务会继续。
+            </div>
+          )}
+          {failure && (
             <div className="error" role="alert">
-              {error}
+              {failure}
             </div>
           )}
           <div className="modal-actions">
             <button type="button" disabled={busy} onClick={onClose}>
-              取消
+              {jobId ? "关闭" : "取消"}
             </button>
             <button
               className="primary"
-              disabled={busy || (!!challenge && !trusted)}
+              disabled={busy || connecting || (!!challenge && !trusted)}
             >
               {busy
                 ? "正在处理…"
-                : challenge
-                  ? "信任并连接"
-                  : node?.identity?.ssh_host_key_fingerprint
-                    ? "连接节点"
-                    : "检测主机"}
+                : connecting
+                  ? "正在连接并检测 RPC…"
+                  : challenge
+                    ? "信任并连接"
+                    : node?.identity?.ssh_host_key_fingerprint
+                      ? "连接节点"
+                      : "检测主机"}
             </button>
           </div>
         </form>
@@ -1087,12 +1223,14 @@ function WorkerModal({
   node: Node;
   worker?: Worker;
   onClose: () => void;
-  onDone: () => void;
+  onDone: (saved?: Worker) => void;
 }) {
   const [selected, setSelected] = useState(
     worker?.device_ids || node.devices.map((d) => d.id),
   );
-  const [port, setPort] = useState(worker?.endpoint.port || 50052);
+  const [port, setPort] = useState(
+    worker?.endpoint.port || node.rpc_discovery?.suggested_port || 50052,
+  );
   const [mode, setMode] = useState(worker?.management_mode || "managed");
   const [service, setService] = useState(
     worker?.management_mode === "observed" ? worker.service_name || "" : "",
@@ -1103,7 +1241,7 @@ function WorkerModal({
     setBusy(true);
     setError("");
     try {
-      await api(
+      const saved = await api<Worker>(
         worker ? `/workers/${worker.id}` : `/nodes/${node.id}/workers`,
         {
           method: worker ? "PATCH" : "POST",
@@ -1115,7 +1253,7 @@ function WorkerModal({
           }),
         },
       );
-      onDone();
+      onDone(saved);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -1126,7 +1264,9 @@ function WorkerModal({
     <div className="modal-backdrop">
       <section className="modal" role="dialog" aria-modal="true">
         <div className="section-heading">
-          <h2>配置 RPC · {node.name}</h2>
+          <h2>
+            {worker ? "修改 RPC 配置" : "新建 RPC"} · {node.name}
+          </h2>
           <button className="icon" aria-label="关闭 RPC 配置" onClick={onClose}>
             <X />
           </button>
@@ -1137,17 +1277,19 @@ function WorkerModal({
             void submit();
           }}
         >
-          <label>
-            管理方式
-            <select
-              aria-label="RPC 管理方式"
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-            >
-              <option value="managed">部署平台专用服务</option>
-              <option value="observed">关联已有服务，验证后接管</option>
-            </select>
-          </label>
+          {worker && (
+            <label>
+              管理方式
+              <select
+                aria-label="RPC 管理方式"
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+              >
+                <option value="managed">部署平台专用服务</option>
+                <option value="observed">关联已有服务，验证后接管</option>
+              </select>
+            </label>
+          )}
           <label>
             RPC 端口
             <input
@@ -1197,7 +1339,7 @@ function WorkerModal({
               取消
             </button>
             <button className="primary" disabled={busy || !selected.length}>
-              保存配置
+              {worker ? "保存配置" : "下一步：部署"}
             </button>
           </div>
         </form>
@@ -1220,6 +1362,10 @@ function DeployModal({
     queryFn: () => api<{ releases: Release[] }>("/releases"),
   });
   const [release, setRelease] = useState(worker.release_id || "");
+  useEffect(() => {
+    if (!release && releases.data?.releases.length)
+      setRelease(releases.data.releases[releases.data.releases.length - 1].id);
+  }, [release, releases.data]);
   const [linger, setLinger] = useState(false);
   const [autostart, setAutostart] = useState(worker.autostart || false);
   const [sudoPassword, setSudoPassword] = useState("");

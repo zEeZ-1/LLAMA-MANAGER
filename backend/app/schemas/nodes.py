@@ -27,6 +27,7 @@ class TrustHost(StrictModel):
     challenge_id: str = Field(max_length=64)
     fingerprint: str = Field(max_length=100)
     replace: bool = False
+    replace_machine: bool = False
 
 
 class ConnectNode(StrictModel):
@@ -66,3 +67,8 @@ class DeployWorker(StrictModel):
 
 class JobOperation(StrictModel):
     idempotency_key: str | None = Field(None, max_length=100)
+
+
+class RemoveWorker(StrictModel):
+    process_identity: dict | None = None
+    force: bool = False

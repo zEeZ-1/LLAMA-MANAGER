@@ -1,0 +1,17 @@
+{
+  "checks": [
+    "password login automatically discovers usable existing RPC without manual worker registration or adoption",
+    "password is freshly checked even with a live key master; SSH auth failure and recovery do not interrupt native inference",
+    "missing/stale SSH control socket is reaped and reconnected without relying on password persistence",
+    "missing stored private key does not block password authentication; new generated key is verified and reused",
+    "new RPC uses free port; same GPU cannot be double claimed; deleting idle new RPC preserves active existing RPC inference",
+    "deleting discovered external user service stops only its identified RPC; other node and external executable remain intact"
+  ],
+  "nodes": [
+    "b07d54fd-d090-499b-8e08-77049a0269eb",
+    "a2df7e0e-eb39-4a77-bc58-008da29127c6"
+  ],
+  "scope": "simulated Linux/SSH service metadata with native OpenSSH, SFTP and CPU RPC over loopback",
+  "deleted_existing_worker": "52979638-04dc-4aaa-9496-87f314317fb4",
+  "instance": "f88ef7f6-4142-424d-8ed4-c21720e64e60"
+}

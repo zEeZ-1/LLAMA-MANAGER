@@ -6,7 +6,8 @@ import socket
 import sys
 
 if __name__ == "__main__":
-    if "password" not in " ".join(sys.argv[1:]).lower():
+    prompt = " ".join(sys.argv[1:]).lower()
+    if "password" not in prompt and "密码" not in prompt:
         raise SystemExit(1)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.connect(os.environ["LIM_ASKPASS_SOCKET"])

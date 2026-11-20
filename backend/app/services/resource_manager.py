@@ -22,12 +22,12 @@ class ResourceManager:
                 "node_operation_busy", "节点管理任务正在执行，请稍后创建实例"
             ) from None
         try:
-            worker_ids = await self._validate(config)
+            worker_ids = await self._validate(config, instance_id)
             await self.store.reserve(worker_ids, instance_id)
         finally:
             self.remote.operations.release()
 
-    async def _validate(self, config):
+    async def _validate(self, config, instance_id=None):
         placement = config.placement
         remote = self.remote
         worker_ids = list(
@@ -50,6 +50,8 @@ class ResourceManager:
                 )
             if worker["management_mode"] != "managed":
                 raise ManagerError("worker_not_managed", "所选 worker 尚未验证接管")
+            if worker.get("state") == "busy":
+                raise ManagerError("rpc_in_use", "所选 RPC 正在被其他客户端使用")
             devices.update(
                 {d["id"]: d for d in node.get("snapshot", {}).get("devices", [])}
             )
@@ -62,6 +64,25 @@ class ResourceManager:
                     raise ManagerError("device_mismatch", "设备不属于所选 RPC worker")
             elif device["node_id"] != "local":
                 raise ManagerError("placement_invalid", "远端设备必须指定所属 worker")
+        selected_devices = {
+            d for wid in worker_ids for d in remote.worker(wid)["device_ids"]
+        }
+        for claim in await self.store.claims():
+            if claim["instance_id"] == instance_id:
+                continue
+            occupied = remote.workers.get(claim["worker_id"], {})
+            if selected_devices.intersection(occupied.get("device_ids", [])):
+                raise ManagerError(
+                    "worker_busy", f"所选 GPU 已被实例 {claim['instance_id']} 占用"
+                )
+        for other in remote.workers.values():
+            if (
+                other["id"] not in worker_ids
+                and not other.get("deleted_at")
+                and other.get("client_count")
+                and selected_devices.intersection(other.get("device_ids", []))
+            ):
+                raise ManagerError("rpc_in_use", "同一 GPU 上的其他 RPC 正被客户端占用")
         return worker_ids
 
     async def prepare(self, instance_id, config):
@@ -70,7 +91,7 @@ class ResourceManager:
         placement = config.placement
         remote = self.remote
         async with remote.operations:
-            worker_ids = await self._validate(config)
+            worker_ids = await self._validate(config, instance_id)
             claims = {c["worker_id"]: c for c in await self.store.claims()}
             if any(
                 wid not in claims
@@ -133,6 +154,18 @@ class ResourceManager:
             c for c in await self.store.claims() if c["instance_id"] == instance_id
         ]
         if not claims:
+            return
+        record = (
+            self.instance_manager.instances.get(instance_id)
+            if self.instance_manager
+            else None
+        )
+        if (
+            record
+            and record["runtime"].get("pid") is None
+            and all(c["state"] == "reserved" for c in claims)
+        ):
+            await self.store.claim_state(instance_id, "released")
             return
         await self.store.claim_state(instance_id, "releasing")
         try:
@@ -199,4 +232,6 @@ class ResourceManager:
                 ]
                 return {"claims": remaining, "released": not remaining}
 
-        return await self.remote.jobs.submit(worker["node_id"], "reconcile", work)
+        return await self.remote.jobs.submit(
+            worker["node_id"], "reconcile", work, worker_id=identifier
+        )
