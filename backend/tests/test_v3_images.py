@@ -165,6 +165,104 @@ def test_vision_capability_failure_is_reported_without_waiting_for_timeout(cfg):
     asyncio.run(check())
 
 
+def test_qwen35_package_creation_image_and_explicit_text_modes(client, cfg):
+    root = cfg.models.directories[0] / "qwen-new"
+    gguf(
+        root / "main.gguf",
+        metadata={
+            "general.architecture": "qwen35",
+            "general.name": "Qwen3.8-27B",
+            "qwen35.embedding_length": 5120,
+        },
+    )
+    gguf(
+        root / "mmproj.gguf",
+        metadata={
+            "general.architecture": "clip",
+            "general.name": "Qwen3.8-27B",
+            "clip.has_vision_encoder": True,
+            "clip.projector_type": "qwen3vl_merger",
+            "clip.vision.projection_dim": 5120,
+        },
+    )
+    model = wait_for(
+        lambda: next(
+            (
+                m
+                for m in client.get("/api/v1/models").json()["models"]
+                if m["relative_directory"] == "qwen-new"
+            ),
+            None,
+        )
+    )
+    assert model["kind"] == "image_text" and model["availability"] == "available"
+    assert (
+        model["runtime_support"] == "candidate" and not model["detection"]["verified"]
+    )
+    assert len(model["variants"]) == 1 and len(model["projectors"]) == 1
+    for modality in ("image_text", "text"):
+        created = client.post(
+            "/api/v1/instances",
+            json={
+                "name": "Qwen architecture test",
+                "model_id": model["id"],
+                "config": {"modality": modality},
+            },
+        )
+        assert created.status_code == 202, created.text
+        instance = ready(client, created.json())
+        argv = client.app.state.manager.get(instance["id"])["runtime"]["argv"]
+        assert ("--mmproj" in argv) == (modality == "image_text")
+        assert instance["capabilities"]["image_input"] == (modality == "image_text")
+        if modality == "image_text":
+            assert "--no-mmproj-offload" in argv
+            image = client.post("/api/v1/media/images", content=picture()).json()
+            content = [
+                {"type": "image", "image_id": image["id"]},
+                {"type": "text", "text": "describe"},
+            ]
+        else:
+            content = "hello"
+        response = client.post(
+            "/api/v1/instances/" + instance["id"] + "/chat/completions",
+            json={"messages": [{"role": "user", "content": content}], "stream": False},
+        )
+        assert response.status_code == 200, response.text
+        client.delete("/api/v1/instances/" + instance["id"])
+
+
+def test_qwen35_missing_projector_and_unknown_architecture_remain_blocked(client, cfg):
+    root = cfg.models.directories[0]
+    gguf(
+        root / "qwen-missing" / "main.gguf", metadata={"general.architecture": "qwen35"}
+    )
+    gguf(
+        root / "unrecognized" / "main.gguf",
+        metadata={"general.architecture": "unknown_future_arch"},
+    )
+    models = wait_for(
+        lambda: (
+            ms
+            if len(ms := client.get("/api/v1/models").json()["models"]) == 3
+            else None
+        )
+    )
+    missing = next(m for m in models if m["relative_directory"] == "qwen-missing")
+    unknown = next(m for m in models if m["relative_directory"] == "unrecognized")
+    assert missing["kind"] == "image_text" and missing["availability"] == "incomplete"
+    assert unknown["availability"] == "unsupported"
+    for model in (missing, unknown):
+        response = client.post(
+            "/api/v1/instances",
+            json={
+                "name": "blocked",
+                "model_id": model["id"],
+                "config": {"modality": "image_text"},
+            },
+        )
+        assert response.status_code == 409
+
+
 def test_package_variants_shards_legacy_and_unknown_format(client, cfg):
     root = cfg.models.directories[0]
     gguf(root / "loose.gguf")

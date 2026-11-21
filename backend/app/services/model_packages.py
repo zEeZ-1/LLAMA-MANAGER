@@ -10,6 +10,7 @@ TEXT_ARCHES = {
     "qwen2",
     "qwen3",
     "qwen3moe",
+    "qwen35",
     "gemma",
     "gemma2",
     "gemma3",
@@ -32,7 +33,7 @@ TEXT_ARCHES = {
     "qwen3vl",
     "qwen3vlmoe",
 }
-VISION_ARCHES = {"qwen2vl", "qwen3vl", "qwen3vlmoe"}
+VISION_ARCHES = {"qwen2vl", "qwen3vl", "qwen3vlmoe", "qwen35"}
 EMBEDDING_ARCHES = {"bert", "nomic-bert", "nomic-bert-moe", "jina-bert-v2", "t5encoder"}
 
 

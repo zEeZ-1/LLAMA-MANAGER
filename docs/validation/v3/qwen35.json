@@ -1,0 +1,28 @@
+{
+  "date": "2026-11-21",
+  "model": "Qwen3.8-27B UD-Q4_K_M",
+  "repository": "unsloth/Qwen3.8-27B-GGUF",
+  "revision": "4af51b3542f775b0a8e4b310bfb3f17e01c306c9",
+  "architecture": "qwen35",
+  "projector_type": "qwen3vl_merger",
+  "embedding_length": 5120,
+  "projection_dim": 5120,
+  "catalog": {
+    "format": "gguf",
+    "kind": "image_text",
+    "availability": "available",
+    "runtime_support": "candidate",
+    "vision_runtime_verified": false
+  },
+  "native_check": {
+    "fixed_commit": "9214bdb554544c35e4a9e2c2e8b75d8cfee330ab",
+    "mode": "vocab_only",
+    "architecture_and_hparams_and_vocabulary_loaded": true,
+    "weight_tensors_loaded": false,
+    "inference_performed": false
+  },
+  "backend_tests_passed": 67,
+  "running_api_catalog_confirmed": true,
+  "active_instances_after": 0,
+  "publication_note": "No private addresses, process identities, persistent identifiers or credentials included."
+}
