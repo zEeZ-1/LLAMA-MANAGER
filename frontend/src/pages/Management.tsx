@@ -1,4 +1,5 @@
 import { Nodes } from "./Nodes";
+import { InstanceFailure } from "../components/InstanceFailure";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -406,11 +407,7 @@ export function Management() {
                           {i.name}
                         </button>
                         <small>{i.model_name}</small>
-                        {i.error_message && (
-                          <small className="error-text">
-                            {i.error_message}
-                          </small>
-                        )}
+                        <InstanceFailure instance={i} compact />
                       </td>
                       <td>
                         <Status instance={i} />
@@ -521,9 +518,7 @@ export function Management() {
                 {activeDetail.config.threads}
               </dd>
             </dl>
-            {activeDetail.error_message && (
-              <div className="error">{activeDetail.error_message}</div>
-            )}
+            <InstanceFailure instance={activeDetail} />
             <h3>
               运行日志 <span className="muted">最近 32 KiB</span>
             </h3>

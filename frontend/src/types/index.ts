@@ -132,6 +132,12 @@ export interface Instance {
     };
   };
   error_message: string | null;
+  error_detail?: {
+    code: string;
+    message: string;
+    log_excerpt: string;
+    exit_code?: number;
+  } | null;
   created_at: string;
   started_at: string | null;
   stopped_at: string | null;

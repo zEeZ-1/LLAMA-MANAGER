@@ -30,6 +30,21 @@ if args.c == 130:
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 if args.c == 129:
     raise SystemExit(12)
+if args.c == 131:
+    time.sleep(0.15)
+    print(
+        "W [ggml_backend_rpc_buffer_type_alloc_buffer] endpoint: 192.0.2.10:50052, device: 0, size: 960.00 MiB -> failed",
+        flush=True,
+    )
+    print(
+        "E llama_init_from_model: failed to initialize the context: failed to allocate buffer for kv cache",
+        flush=True,
+    )
+    print(
+        "E common_init: failed to create context with model '/private/models/example.gguf'",
+        flush=True,
+    )
+    raise SystemExit(17)
 
 
 class Handler(BaseHTTPRequestHandler):

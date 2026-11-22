@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "UI creation reaches failed state through actual API and subprocess",
+    "list shows causal RPC allocation size",
+    "details show KV phase, exit status and native error excerpt",
+    "refresh preserves diagnostics",
+    "390px layout does not overflow"
+  ],
+  "page_errors": [],
+  "date": "2026-11-22",
+  "backend_tests_passed": 71,
+  "frontend_tests_passed": 9,
+  "scope": "isolated API, simulated native failure, candidate production UI"
+}

@@ -41,6 +41,14 @@
 
 创建成功返回独立 UUID、`status: starting`，后台健康检查通过后变为 ready。可执行文件缺失或启动系统调用失败时同样保留并返回 failed 记录，具体原因在 `error_message` 中。`runtime` 子对象包含 `pid` 和 `internal_port`；`config` 不含运行态信息。
 
+实例失败信息：异步创建返回 202 后，继续轮询实例列表或详情。`status:failed` 时保留兼容字段 `error_message`，同时返回：
+
+```json
+{"error_detail":{"code":"runtime_memory_allocation_failed","message":"远端 rpc-node:50052 内存分配失败，申请 960.00 MiB（KV 缓存）。","log_excerpt":"E ... failed to allocate buffer for kv cache","exit_code":1}}
+```
+
+`error_detail` 为可空字段；退出码只在确认可获取时提供。后端从最近 32 KiB 日志中提取原因，错误摘要最多 1000 字符，关键日志最多 10 行 / 4000 字符。内存分配失败保留节点、申请大小及可识别的 KV 阶段；端口占用、运行时错误、超时和无日志退出也保留诊断。公开摘要去掉终端控制符、已知凭据形式和绝对目录，完整日志仍通过原日志接口查看。重启可为保留了日志的旧失败记录补齐原因，不重载模型。
+
 Chat：
 
 ```json

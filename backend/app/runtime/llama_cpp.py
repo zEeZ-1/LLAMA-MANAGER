@@ -2,6 +2,7 @@ import os
 import asyncio
 import httpx
 from .base import RuntimeAdapter
+from .failures import describe_failure
 
 
 class LlamaCppAdapter(RuntimeAdapter):
@@ -151,7 +152,13 @@ class LlamaCppAdapter(RuntimeAdapter):
             return False
 
     async def cleanup_exited(self, instance):
-        await self.supervisor.reap(instance["id"])
+        return await self.supervisor.reap(instance["id"])
+
+    async def failure_details(
+        self, instance, fallback, code="runtime_exited", exit_code=None
+    ):
+        text = await asyncio.to_thread(self.supervisor.log_tail, instance["id"])
+        return describe_failure(text, fallback, code, exit_code)
 
     async def maintain(self, instance):
         await asyncio.to_thread(self.supervisor.trim_log, instance["id"])

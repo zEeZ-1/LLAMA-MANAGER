@@ -87,7 +87,16 @@ class ProcessSupervisor:
 
     async def reap(self, instance_id):
         if proc := self.children.pop(instance_id, None):
-            await proc.wait()
+            return await proc.wait()
+
+    def log_tail(self, instance_id):
+        filename = self.settings.storage.logs / f"{instance_id}.log"
+        try:
+            with filename.open("rb") as stream:
+                stream.seek(max(0, filename.stat().st_size - 32768))
+                return stream.read(32768).decode(errors="replace")
+        except OSError:
+            return ""
 
     def trim_log(self, instance_id):
         filename = self.settings.storage.logs / f"{instance_id}.log"

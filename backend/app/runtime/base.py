@@ -16,3 +16,8 @@ class RuntimeAdapter(ABC):
 
     async def maintain(self, instance):
         pass
+
+    async def failure_details(
+        self, instance, fallback, code="runtime_exited", exit_code=None
+    ):
+        return {"code": code, "message": fallback, "log_excerpt": ""}

@@ -44,6 +44,14 @@ class InstanceManager:
                     "failed",
                     "manager_terminated: previous manager exited; model is not reloaded",
                 )
+            elif record["status"] == "failed" and not record.get("error_detail"):
+                if adapter := self.adapters.get(record["runtime_type"]):
+                    detail = await adapter.failure_details(
+                        record, record.get("error_message") or "实例运行失败"
+                    )
+                    record["error_message"] = detail["message"]
+                    record["error_detail"] = detail
+                    await self.repository.save(record)
         if self.resources:
             self.resources.instance_manager = self
             for instance_id in {
@@ -51,7 +59,7 @@ class InstanceManager:
             }:
                 await self.resources.release(instance_id)
 
-    async def _transition(self, record, status, error=None):
+    async def _transition(self, record, status, error=None, error_detail=None):
         allowed = {
             "created": {"starting", "stopping", "failed"},
             "starting": {"ready", "stopping", "failed"},
@@ -65,6 +73,7 @@ class InstanceManager:
             raise RuntimeError(f"Invalid instance transition: {old} -> {status}")
         record["status"] = status
         record["error_message"] = error
+        record["error_detail"] = error_detail
         if status == "ready":
             record["started_at"] = record["started_at"] or utcnow()
         if status in {"failed", "stopped"}:
@@ -137,6 +146,7 @@ class InstanceManager:
                     "endpoint": f"http://{self.settings.instances.host}:{port}",
                 },
                 error_message=None,
+                error_detail=None,
                 created_at=utcnow(),
                 started_at=None,
                 stopped_at=None,
@@ -187,12 +197,17 @@ class InstanceManager:
             except BaseException as exc:
                 if record["runtime"].get("pid") and adapter.get_status(record):
                     await adapter.stop(record)
+                exit_code = await adapter.cleanup_exited(record)
+                detail = await self._failure_details(
+                    record, adapter, exc, "startup_failed", exit_code
+                )
                 await self._transition(
                     record,
                     "failed",
                     "startup_cancelled"
                     if isinstance(exc, asyncio.CancelledError)
-                    else str(exc),
+                    else detail["message"],
+                    None if isinstance(exc, asyncio.CancelledError) else detail,
                 )
                 if self.resources:
                     await self.resources.release(record["id"])
@@ -217,21 +232,33 @@ class InstanceManager:
                     if record["status"] not in {"starting", "ready"}:
                         return
                     if not adapter.get_status(record):
-                        await adapter.cleanup_exited(record)
+                        exit_code = await adapter.cleanup_exited(record)
+                        detail = await adapter.failure_details(
+                            record,
+                            "llama-server exited unexpectedly; inspect instance log",
+                            exit_code=exit_code,
+                        )
                         await self._transition(
                             record,
                             "failed",
-                            "llama-server exited unexpectedly; inspect instance log",
+                            detail["message"],
+                            detail,
                         )
                         if self.resources:
                             await self.resources.release(record["id"])
                         return
                     if self.resources and not await self.resources.healthy(record):
                         await adapter.stop(record)
+                        detail = await adapter.failure_details(
+                            record,
+                            "RPC worker exited or its process identity changed",
+                            "rpc_worker_lost",
+                        )
                         await self._transition(
                             record,
                             "failed",
-                            "RPC worker exited or its process identity changed",
+                            detail["message"],
+                            detail,
                         )
                         await self.resources.release(record["id"])
                         return
@@ -242,10 +269,16 @@ class InstanceManager:
                                 await self.resources.active(record["id"])
                         elif asyncio.get_running_loop().time() > deadline:
                             await adapter.stop(record)
+                            detail = await adapter.failure_details(
+                                record,
+                                "Model startup timed out; inspect instance log",
+                                "startup_timeout",
+                            )
                             await self._transition(
                                 record,
                                 "failed",
-                                "Model startup timed out; inspect instance log",
+                                detail["message"],
+                                detail,
                             )
                             if self.resources:
                                 await self.resources.release(record["id"])
@@ -258,9 +291,24 @@ class InstanceManager:
             log.exception("Instance monitor failed")
             if adapter.get_status(record):
                 await adapter.stop(record)
-            await self._transition(record, "failed", str(exc))
+            detail = await self._failure_details(
+                record, adapter, exc, "runtime_monitor_failed"
+            )
+            await self._transition(record, "failed", detail["message"], detail)
             if self.resources:
                 await self.resources.release(record["id"])
+
+    async def _failure_details(self, record, adapter, exc, code, exit_code=None):
+        detail = getattr(exc, "detail", None)
+        if isinstance(detail, dict):
+            message = str(detail.get("message", exc))
+            code = str(detail.get("code", code))
+        else:
+            message = str(exc)
+            prefix, separator, _ = message.partition(":")
+            if separator and prefix.replace("_", "").isalpha() and "_" in prefix:
+                code = prefix
+        return await adapter.failure_details(record, message, code, exit_code)
 
     async def destroy(self, instance_id):
         record = self.get(instance_id)

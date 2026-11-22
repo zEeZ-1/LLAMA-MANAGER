@@ -664,6 +664,32 @@ td strong {
   color: #f4aaaa !important;
   font-size: 0.8125rem;
 }
+
+.instance-failure-summary {
+  max-width: 30rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.instance-failure {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.instance-failure strong {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+.instance-failure details {
+  margin-top: 0.6rem;
+}
+.instance-failure summary {
+  cursor: pointer;
+}
+.instance-failure pre {
+  max-height: 14rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+}
 .modal-backdrop {
   position: fixed;
   inset: 0;
