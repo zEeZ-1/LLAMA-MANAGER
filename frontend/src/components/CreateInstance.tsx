@@ -8,7 +8,7 @@ import type { Instance, InstanceConfig, PlacementDevice } from "../types";
 export function CreateInstance() {
   const { createModel, closeCreate, navigate } = useUI();
   const models = useModels(),
-    nodes = useNodes();
+    nodes = useNodes(false);
   const client = useQueryClient();
   const [modelId, setModelId] = useState(createModel || "");
   const [nodeId, setNodeId] = useState("local");
@@ -128,7 +128,7 @@ export function CreateInstance() {
           </button>
         </div>
         <p className="muted">
-          每个实例使用独立的 llama-server 进程和推理上下文。
+          选择模型与计算设备，按需调整上下文和并发参数。
         </p>
         <form
           onSubmit={(e) => {

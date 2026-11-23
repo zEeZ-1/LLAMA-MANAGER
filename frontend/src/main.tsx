@@ -8,14 +8,15 @@ import {
   Layers,
   MessageSquare,
   Plus,
-  Cpu,
-  Github,
 } from "lucide-react";
 import { useUI } from "./services/ui";
-import { useInstances } from "./services/api";
+import { DialogAccessibility } from "./components/DialogAccessibility";
+import { BrandMark } from "./components/BrandMark";
+import { useInstances, useNodes } from "./services/api";
 import { Management } from "./pages/Management";
 import { CreateInstance } from "./components/CreateInstance";
 import "./style.css";
+import "./ascnet.css";
 const Chat = lazy(() => import("./pages/Chat"));
 const client = new QueryClient({
   defaultOptions: {
@@ -46,6 +47,9 @@ class ErrorBoundary extends React.Component<
 function App() {
   const { page, navigate, openCreate, createModel } = useUI();
   const instances = useInstances();
+  const nodes = useNodes();
+  const online =
+    nodes.data?.nodes.filter((n) => n.status === "online").length ?? 0;
   const ready =
     instances.data?.instances.filter((i) => i.status === "ready").length ?? 0;
   const nav = [
@@ -57,60 +61,58 @@ function App() {
   ] as const;
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <a className="brand" href="/" aria-label="Llama 首页">
-          <span className="brand-icon">
-            <Cpu size={24} />
-          </span>
-          <span>
-            llama<span className="brand-sub">INFERENCE MANAGER</span>
-          </span>
-        </a>
-        <div className="nav-label">
-          WORKSPACE <span>V3</span>
-        </div>
-        <nav>
+      <DialogAccessibility />
+      <header className="app-header">
+        <button
+          className="ascnet-brand"
+          aria-label="AscNet 首页"
+          onClick={() => navigate("dashboard")}
+        >
+          <BrandMark size={32} />
+          <span>AscNet</span>
+          <span className="version-tag">v3.1</span>
+        </button>
+        <nav className="app-nav" aria-label="主导航">
           {nav.map(([key, Icon, label]) => (
             <button
               key={key}
-              className={page === key ? "nav active" : "nav"}
+              aria-label={label}
+              aria-current={page === key ? "page" : undefined}
+              className={page === key ? "active" : ""}
               onClick={() => navigate(key)}
             >
-              <Icon size={19} />
-              {label}
-              {key === "instances" && (
-                <span className="nav-count">{ready}</span>
+              <Icon size={17} />
+              <span>{label}</span>
+              {key === "instances" && ready > 0 && (
+                <span className="nav-count" aria-hidden="true">
+                  {ready}
+                </span>
               )}
             </button>
           ))}
         </nav>
-        <div className="sidebar-bottom">
-          <div className="local-status">
-            <span className={`dot ${instances.isError ? "failed" : "ready"}`} />
-            {instances.isError ? "管理服务未连接" : "Local workspace"}
-          </div>
-          <span className="muted">llama.cpp · 集中管理</span>
-          <a
-            href="https://github.com/ggml-org/llama.cpp"
-            target="_blank"
-            rel="noreferrer"
+        <div className="header-actions">
+          <span className="workspace-connection">
+            <span
+              className={`dot ${instances.isError || nodes.isError ? "failed" : nodes.isPending ? "starting" : "ready"}`}
+            />
+            {instances.isError || nodes.isError
+              ? "连接异常"
+              : nodes.isPending
+                ? "连接中"
+                : `${online} 节点在线`}
+          </span>
+          <button
+            className="primary small"
+            aria-label="创建实例"
+            onClick={() => openCreate()}
           >
-            <Github size={15} /> llama.cpp
-          </a>
+            <Plus size={16} />
+            <span>创建实例</span>
+          </button>
         </div>
-      </aside>
+      </header>
       <main className={page === "chat" ? "main chat-main" : "main"}>
-        {page !== "chat" && (
-          <header className="topbar">
-            <span>
-              工作空间 <span className="slash">/</span>{" "}
-              {nav.find((n) => n[0] === page)?.[2]}
-            </span>
-            <button className="primary small" onClick={() => openCreate()}>
-              <Plus size={16} /> 创建实例
-            </button>
-          </header>
-        )}
         <ErrorBoundary>
           <Suspense fallback={<div className="empty">加载对话…</div>}>
             {page === "chat" ? <Chat /> : <Management />}

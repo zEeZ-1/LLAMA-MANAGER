@@ -1,12 +1,14 @@
-# llama.cpp Inference Manager
+# AscNet · v3.1
 
-轻量的 llama.cpp 推理工作台，支持单机和 SSH 集中管理的多机 RPC。包含模型包自动发现、图文实例、图片对话、流式 Chat 和本地多会话。界面参考 EXO 的深色工作台、节点卡片和双栏对话交互。
+轻量的 llama.cpp 推理工作台，支持单机和 SSH 集中管理的多机 RPC。包含模型包自动发现、图文实例、图片对话、流式 Chat 和本地多会话。WebUI 借鉴 EXO 的深色中性色与黄色强调，提供节点拓扑、模型与实例卡片，以及可收起的会话 / 对话 / 资源三栏。
 
 生产运行只有一个 FastAPI 进程，直接提供 React 静态构建产物；每个实例单独启动一个普通模式 `llama-server`。管理层不加载模型权重，不依赖 PyTorch、Transformers、Redis 或常驻 Node 服务。
 
 V2 已实现密码接入与自动密钥引导、主机指纹确认、远端配置采集、匹配发布包部署、RPC 自动发现、新建 / 删除 / 启停 / 日志 / 缓存，以及按设备顺序和权重创建多机实例。远端无需安装管理 Agent。Jetson 显示共享系统内存，显存指标缺失不会被显示为 GPU 不可用。测试范围和真实硬件联调状态见 [V2 验证记录](docs/validation_v2.md)。
 
 V3 Image 增加独立模型目录、格式 / 类型识别、多模态实例和前后端图片链路。设计与边界见 [V3 开发设计](docs/development_v3.md)，实现及实际验证范围见 [V3 验证记录](docs/validation_v3.md)。
+
+v3.1 完成 AscNet 品牌与 WebUI 更新，保留 V3 图文链路和 SSH / RPC 操作。版本说明、数据兼容及验收范围见 [v3.1 设计与发布记录](docs/development_v3_1.md) 和 [验证记录](docs/validation_v3_1.md)。
 
 ## 快速开始
 

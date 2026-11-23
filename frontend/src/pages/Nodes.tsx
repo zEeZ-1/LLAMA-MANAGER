@@ -1,3 +1,4 @@
+import { MemoryBar } from "../components/ClusterPanel";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -67,7 +68,7 @@ const operationNames: Record<string, string> = {
 };
 
 export function Nodes() {
-  const query = useNodes();
+  const query = useNodes(false);
   const client = useQueryClient();
   const [connect, setConnect] = useState<Node | "new" | null>(null);
   const [edit, setEdit] = useState<Node | null>(null);
@@ -149,6 +150,9 @@ export function Nodes() {
                   <Network size={26} />
                 </div>
                 <div>
+                  <span className="node-role">
+                    {node.role === "controller" ? "控制节点" : "RPC 计算节点"}
+                  </span>
                   <h2>{node.name}</h2>
                   <span className="muted mono">
                     {node.address || node.hostname}
@@ -175,6 +179,7 @@ export function Nodes() {
                 <span>系统内存</span>
                 <strong>{bytes(node.memory_info.total)}</strong>
                 <small>{bytes(node.memory_info.available)} 可用</small>
+                <MemoryBar node={node} />
               </div>
               <div>
                 <span>

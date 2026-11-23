@@ -33,11 +33,11 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   }
   return response.json();
 }
-export const useNodes = () =>
+export const useNodes = (poll = true) =>
   useQuery({
     queryKey: ["nodes"],
     queryFn: () => api<{ nodes: Node[] }>("/nodes"),
-    refetchInterval: 5000,
+    refetchInterval: poll ? 5000 : false,
   });
 export const useModels = () =>
   useQuery({
@@ -55,11 +55,11 @@ export const useModels = () =>
       }>("/models"),
     refetchInterval: 5000,
   });
-export const useInstances = () =>
+export const useInstances = (poll = true) =>
   useQuery({
     queryKey: ["instances"],
     queryFn: () => api<{ instances: Instance[] }>("/instances"),
-    refetchInterval: 2000,
+    refetchInterval: poll ? 2000 : false,
   });
 export const bytes = (n: number | null | undefined) =>
   n == null

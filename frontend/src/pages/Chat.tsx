@@ -7,9 +7,18 @@ import {
   Send,
   Square,
   MessageSquare,
-  Cpu,
+  PanelLeft,
+  PanelRight,
+  X,
+  ArrowUpRight,
+  Code2,
+  Lightbulb,
+  BookOpen,
+  UserRound,
   ImagePlus,
 } from "lucide-react";
+import { BrandMark } from "../components/BrandMark";
+import { ClusterPanel } from "../components/ClusterPanel";
 import { db, loadMessages, removeSession } from "../database/chat";
 import { useInstances, errorText, HttpError } from "../services/api";
 import { streamChat } from "../services/sse";
@@ -20,7 +29,64 @@ import { useUI } from "../services/ui";
 import type { ChatMessage, ChatSession } from "../types";
 
 export default function Chat() {
-  const instances = useInstances();
+  const instances = useInstances(false);
+  const [historyOpen, setHistoryOpen] = useState(() => window.innerWidth > 800);
+  const [resourcesOpen, setResourcesOpen] = useState(
+    () => window.innerWidth > 1280,
+  );
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const historyRef = useRef<HTMLElement>(null);
+  const resourceRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const resize = () => {
+      setViewportWidth(window.innerWidth);
+      if (window.innerWidth <= 800) setHistoryOpen(false);
+      if (window.innerWidth <= 1100) setResourcesOpen(false);
+    };
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+  const drawerOpen =
+    (historyOpen && viewportWidth <= 800) ||
+    (resourcesOpen && viewportWidth <= 1100);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const panel =
+      historyOpen && viewportWidth <= 800
+        ? historyRef.current
+        : resourceRef.current;
+    const focusable = () =>
+      Array.from(
+        panel?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input, select, textarea, [tabindex="0"]',
+        ) || [],
+      );
+    focusable()[0]?.focus();
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setHistoryOpen(false);
+        setResourcesOpen(false);
+      }
+      if (event.key === "Tab") {
+        const list = focusable();
+        const first = list[0],
+          last = list[list.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("keydown", key);
+      previous?.focus();
+    };
+  }, [drawerOpen, historyOpen, viewportWidth]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [session, setSession] = useState<ChatSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -88,6 +154,7 @@ export default function Chat() {
       if (!mounted.current || version !== selectionVersion.current) return;
       discardDraft();
       setSession(s);
+      if (window.innerWidth <= 800) setHistoryOpen(false);
       setMessages(history);
       setInstanceId(s.instance_id);
       setVisible(100);
@@ -308,102 +375,180 @@ export default function Chat() {
   }
 
   return (
-    <div className="chat-layout">
-      <aside className="sessions">
-        <div className="section-heading">
-          <h2>对话</h2>
+    <div
+      className={`chat-layout ${historyOpen ? "history-open" : ""} ${resourcesOpen ? "resources-open" : ""}`}
+    >
+      {drawerOpen && (
+        <button
+          className="drawer-backdrop"
+          aria-label="关闭侧栏"
+          tabIndex={-1}
+          onClick={() => {
+            setHistoryOpen(false);
+            setResourcesOpen(false);
+          }}
+        />
+      )}
+      {historyOpen && (
+        <aside
+          className="sessions"
+          id="chat-history"
+          ref={historyRef}
+          aria-label="会话列表"
+        >
+          <div className="section-heading">
+            <span className="eyebrow">YOUR CONVERSATIONS</span>
+            <button
+              className="icon"
+              aria-label="关闭会话列表"
+              onClick={() => setHistoryOpen(false)}
+            >
+              <X size={16} />
+            </button>
+          </div>
           <button
-            className="icon"
-            aria-label="新建会话"
+            className="new-chat"
             disabled={busy || imagePending}
             onClick={newChat}
           >
-            <Plus size={20} />
+            <Plus size={16} /> 新建会话
           </button>
-        </div>
-        <button
-          className="new-chat"
-          disabled={busy || imagePending}
-          onClick={newChat}
-        >
-          <Plus size={16} /> 新建会话
-        </button>
-        <span className="nav-label">最近会话</span>
-        <div className="session-list">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              className={`session-item ${session?.id === s.id ? "selected" : ""}`}
-            >
-              <button
-                disabled={busy || imagePending}
-                onClick={() => void selectSession(s)}
+          <span className="nav-label">最近会话</span>
+          <div className="session-list">
+            {sessions.map((s) => (
+              <div
+                key={s.id}
+                className={`session-item ${session?.id === s.id ? "selected" : ""}`}
               >
-                <MessageSquare size={15} />
-                <span>
-                  {s.title}
-                  <small>{s.model_name}</small>
-                </span>
-              </button>
-              <button
-                className="icon"
-                aria-label={`删除会话 ${s.title}`}
-                disabled={busy || imagePending}
-                onClick={() => void deleteChat(s)}
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
-          {!sessions.length && (
-            <p className="muted">你的对话会自动保存在本机浏览器。</p>
-          )}
-        </div>
-        <div className="session-footer">本地会话 · IndexedDB</div>
-      </aside>
-      <section className="conversation">
-        <header className="chat-header">
-          <div>
-            <span className="eyebrow">CHAT WORKSPACE</span>
-            <h2>{session?.title || "新对话"}</h2>
+                <button
+                  disabled={busy || imagePending}
+                  onClick={() => void selectSession(s)}
+                >
+                  <MessageSquare size={15} />
+                  <span>
+                    {s.title}
+                    <small>{s.model_name}</small>
+                  </span>
+                </button>
+                <button
+                  className="icon"
+                  aria-label={`删除会话 ${s.title}`}
+                  disabled={busy || imagePending}
+                  onClick={() => void deleteChat(s)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            {!sessions.length && (
+              <p className="muted">你的对话会自动保存在本机浏览器。</p>
+            )}
           </div>
-          <label className="instance-select">
-            <span className={`dot ${selectedReady ? "ready" : "stopped"}`} />
-            <select
-              aria-label="选择就绪实例"
-              disabled={busy || imagePending}
-              value={instanceId}
-              onChange={(e) => void changeInstance(e.target.value)}
+          <div className="session-footer">
+            <span className="dot ready" />
+            会话仅保存在此浏览器
+          </div>
+        </aside>
+      )}
+      <section className="conversation" inert={drawerOpen}>
+        <header className="chat-header">
+          <div className="chat-title-group">
+            <button
+              className="icon"
+              aria-label={historyOpen ? "隐藏会话列表" : "显示会话列表"}
+              aria-expanded={historyOpen}
+              aria-controls="chat-history"
+              onClick={() => {
+                setHistoryOpen((v) => !v);
+                if (window.innerWidth <= 800) setResourcesOpen(false);
+              }}
             >
-              <option value="">选择就绪实例</option>
-              {instanceId && !selectedReady && (
-                <option value={instanceId}>原实例不可用，请切换</option>
-              )}
-              {ready.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              <PanelLeft size={18} />
+            </button>
+            <div>
+              <span className="eyebrow">CHAT WORKSPACE</span>
+              <h2>{session?.title || "新对话"}</h2>
+            </div>
+          </div>
+          <div className="chat-header-controls">
+            <label className="instance-select">
+              <span className={`dot ${selectedReady ? "ready" : "stopped"}`} />
+              <select
+                aria-label="选择就绪实例"
+                disabled={busy || imagePending}
+                value={instanceId}
+                onChange={(e) => void changeInstance(e.target.value)}
+              >
+                <option value="">选择就绪实例</option>
+                {instanceId && !selectedReady && (
+                  <option value={instanceId}>原实例不可用，请切换</option>
+                )}
+                {ready.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className={`icon ${resourcesOpen ? "accent" : ""}`}
+              aria-label={resourcesOpen ? "隐藏计算资源" : "显示计算资源"}
+              aria-expanded={resourcesOpen}
+              aria-controls="chat-resources"
+              onClick={() => {
+                setResourcesOpen((v) => !v);
+                if (window.innerWidth <= 800) setHistoryOpen(false);
+              }}
+            >
+              <PanelRight size={18} />
+            </button>
+          </div>
         </header>
         <div className="messages" aria-live="polite" aria-busy={busy}>
           {!messages.length && (
             <div className="chat-welcome">
               <div className="welcome-icon">
-                <Cpu size={34} />
+                <BrandMark size={53} />
               </div>
-              <span className="eyebrow">YOUR MODELS. YOUR MACHINE.</span>
-              <h1>让想法开始对话。</h1>
-              <p>选择一个就绪实例，开启属于你的本地 AI 对话。</p>
+              <span className="eyebrow">YOUR MODELS. YOUR NETWORK.</span>
+              <h1>从一个问题开始。</h1>
+              <p>连接你的模型，在自己的设备上思考、创作与探索。</p>
               <div className="suggestions">
                 {[
-                  "用简单的语言解释大模型推理",
-                  "帮我写一段 Python 示例",
-                  "一起梳理一个新的想法",
-                ].map((text) => (
-                  <button key={text} onClick={() => setInput(text)}>
-                    {text}
+                  {
+                    icon: BookOpen,
+                    title: "理解一个概念",
+                    caption: "把复杂的问题讲简单",
+                    text: "用简单的语言解释大模型推理",
+                  },
+                  {
+                    icon: Code2,
+                    title: "一起写代码",
+                    caption: "从想法到第一行代码",
+                    text: "帮我写一段 Python 示例",
+                  },
+                  {
+                    icon: Lightbulb,
+                    title: "探索新想法",
+                    caption: "为灵感找到下一个方向",
+                    text: "一起梳理一个新的想法",
+                  },
+                ].map((prompt) => (
+                  <button
+                    key={prompt.title}
+                    onClick={() => {
+                      setInput(prompt.text);
+                      document
+                        .querySelector<HTMLTextAreaElement>(
+                          ".composer textarea",
+                        )
+                        ?.focus();
+                    }}
+                  >
+                    <prompt.icon size={19} />
+                    <strong>{prompt.title}</strong>
+                    <span>{prompt.caption}</span>
+                    <ArrowUpRight size={14} />
                   </button>
                 ))}
               </div>
@@ -420,6 +565,13 @@ export default function Chat() {
           {messages.slice(-visible).map((m) => (
             <article key={m.id} className={`message ${m.role}`}>
               <div className="message-author">
+                <i className={`message-avatar ${m.role}`} aria-hidden="true">
+                  {m.role === "user" ? (
+                    <UserRound size={15} />
+                  ) : (
+                    <BrandMark size={20} />
+                  )}
+                </i>
                 {m.role === "user"
                   ? "你"
                   : m.role === "system"
@@ -572,6 +724,11 @@ export default function Chat() {
           </p>
         </div>
       </section>
+      {resourcesOpen && (
+        <div id="chat-resources" ref={resourceRef}>
+          <ClusterPanel onClose={() => setResourcesOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }
