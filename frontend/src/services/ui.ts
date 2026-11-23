@@ -1,20 +1,60 @@
 import { create } from "zustand";
-export type Page = "dashboard" | "nodes" | "models" | "instances" | "chat";
 interface UI {
-  page: Page;
-  navigate: (page: Page) => void;
+  centerView: "nodes" | "chat";
+  activeSessionId: string | null;
+  chatInstance: string | null;
+  chatRequest: number;
+  chatLocked: boolean;
+  showNodes: () => void;
+  openConversation: (id: string) => void;
+  newConversation: () => void;
+  openChat: (id: string) => void;
   createModel: string | null;
+  createRequest: number;
+  createPending: boolean;
   openCreate: (model?: string) => void;
   closeCreate: () => void;
-  chatInstance: string | null;
-  openChat: (id: string) => void;
 }
-export const useUI = create<UI>((set) => ({
-  page: "dashboard",
-  navigate: (page) => set({ page }),
-  createModel: null,
-  openCreate: (model = "") => set({ createModel: model }),
-  closeCreate: () => set({ createModel: null }),
+export const useUI = create<UI>((set, get) => ({
+  centerView: "nodes",
+  activeSessionId: null,
   chatInstance: null,
-  openChat: (id) => set({ page: "chat", chatInstance: id }),
+  chatRequest: 0,
+  chatLocked: false,
+  showNodes: () => set({ centerView: "nodes" }),
+  openConversation: (id) => {
+    if (!get().chatLocked)
+      set((s) => ({
+        centerView: "chat",
+        activeSessionId: id,
+        chatInstance: null,
+        chatRequest: s.chatRequest + 1,
+      }));
+  },
+  newConversation: () => {
+    if (!get().chatLocked)
+      set((s) => ({
+        centerView: "chat",
+        activeSessionId: null,
+        chatInstance: null,
+        chatRequest: s.chatRequest + 1,
+      }));
+  },
+  openChat: (id) => {
+    if (!get().chatLocked)
+      set((s) => ({
+        centerView: "chat",
+        activeSessionId: null,
+        chatInstance: id,
+        chatRequest: s.chatRequest + 1,
+      }));
+  },
+  createModel: null,
+  createRequest: 0,
+  createPending: false,
+  openCreate: (model = "") => {
+    if (!get().createPending)
+      set((s) => ({ createModel: model, createRequest: s.createRequest + 1 }));
+  },
+  closeCreate: () => set({ createModel: null }),
 }));

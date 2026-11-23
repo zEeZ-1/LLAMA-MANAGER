@@ -6,8 +6,8 @@ import { useUI } from "../services/ui";
 import type { Instance, InstanceConfig, PlacementDevice } from "../types";
 
 export function CreateInstance() {
-  const { createModel, closeCreate, navigate } = useUI();
-  const models = useModels(),
+  const { createModel, closeCreate } = useUI();
+  const models = useModels(false),
     nodes = useNodes(false);
   const client = useQueryClient();
   const [modelId, setModelId] = useState(createModel || "");
@@ -25,7 +25,23 @@ export function CreateInstance() {
     extra_options: {},
     placement: { mode: "local", devices: [] },
   });
+  function chooseModel(id: string) {
+    setModelId(id);
+    setConfig((current) => ({
+      ...current,
+      variant_id: undefined,
+      model_revision: undefined,
+      modality: undefined,
+      vision_device_id: undefined,
+    }));
+  }
   const mutation = useMutation({
+    onMutate: () => {
+      useUI.setState({ createPending: true });
+    },
+    onSettled: () => {
+      useUI.setState({ createPending: false });
+    },
     mutationFn: () =>
       api<Instance>("/instances", {
         method: "POST",
@@ -55,7 +71,6 @@ export function CreateInstance() {
       }),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: ["instances"] });
-      navigate("instances");
       closeCreate();
     },
   });
@@ -106,11 +121,10 @@ export function CreateInstance() {
     ["ubatch_size", "Micro batch", 1, 8192],
   ] as const;
   return (
-    <div className="modal-backdrop">
+    <div className="inline-create-wrap">
       <section
-        className="modal"
-        role="dialog"
-        aria-modal="true"
+        className="create-inline"
+        role="region"
         aria-labelledby="create-title"
       >
         <div className="section-heading">
@@ -120,16 +134,14 @@ export function CreateInstance() {
           </div>
           <button
             className="icon"
-            aria-label="关闭"
+            aria-label="取消创建实例"
             onClick={closeCreate}
             disabled={mutation.isPending}
           >
             <X />
           </button>
         </div>
-        <p className="muted">
-          选择模型与计算设备，按需调整上下文和并发参数。
-        </p>
+        <p className="muted">选择模型与计算设备，按需调整上下文和并发参数。</p>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -144,7 +156,7 @@ export function CreateInstance() {
                 value={nodeId}
                 onChange={(e) => {
                   setNodeId(e.target.value);
-                  setModelId("");
+                  chooseModel("");
                 }}
               >
                 {(nodes.data?.nodes || [])
@@ -162,7 +174,7 @@ export function CreateInstance() {
                 aria-label="模型"
                 required
                 value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
+                onChange={(e) => chooseModel(e.target.value)}
               >
                 <option value="">选择已发现的 GGUF</option>
                 {models.data?.models
@@ -423,7 +435,7 @@ export function CreateInstance() {
             />
           </label>
           <div className="form-grid">
-            {fields.map(([key, label, min, max]) => (
+            {fields.slice(0, 2).map(([key, label, min, max]) => (
               <label key={key}>
                 {label}
                 <input
@@ -439,45 +451,66 @@ export function CreateInstance() {
                 />
               </label>
             ))}
-            {(["cache_type_k", "cache_type_v"] as const).map((key) => (
-              <label key={key}>
-                {key === "cache_type_k" ? "K" : "V"} cache
-                <select
-                  value={config[key]}
-                  onChange={(e) =>
-                    setConfig({ ...config, [key]: e.target.value })
-                  }
-                >
-                  {[
-                    "f16",
-                    "bf16",
-                    "f32",
-                    "q8_0",
-                    "q4_0",
-                    "q4_1",
-                    "q5_0",
-                    "q5_1",
-                    "iq4_nl",
-                  ].map((v) => (
-                    <option key={v}>{v}</option>
-                  ))}
-                </select>
-              </label>
-            ))}
           </div>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={!!config.extra_options.flash_attn}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  extra_options: { flash_attn: e.target.checked },
-                })
-              }
-            />{" "}
-            Flash Attention
-          </label>
+          <details className="advanced-settings">
+            <summary>更多推理参数</summary>
+            <div className="form-grid">
+              {fields.slice(2).map(([key, label, min, max]) => (
+                <label key={key}>
+                  {label}
+                  <input
+                    aria-label={label}
+                    type="number"
+                    required
+                    min={min}
+                    max={max}
+                    value={config[key]}
+                    onChange={(e) =>
+                      setConfig({ ...config, [key]: Number(e.target.value) })
+                    }
+                  />
+                </label>
+              ))}
+              {(["cache_type_k", "cache_type_v"] as const).map((key) => (
+                <label key={key}>
+                  {key === "cache_type_k" ? "K" : "V"} cache
+                  <select
+                    value={config[key]}
+                    onChange={(e) =>
+                      setConfig({ ...config, [key]: e.target.value })
+                    }
+                  >
+                    {[
+                      "f16",
+                      "bf16",
+                      "f32",
+                      "q8_0",
+                      "q4_0",
+                      "q4_1",
+                      "q5_0",
+                      "q5_1",
+                      "iq4_nl",
+                    ].map((v) => (
+                      <option key={v}>{v}</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={!!config.extra_options.flash_attn}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    extra_options: { flash_attn: e.target.checked },
+                  })
+                }
+              />{" "}
+              Flash Attention
+            </label>
+          </details>
           {mutation.error && (
             <div className="error" role="alert">
               <AlertCircle size={16} />
@@ -495,7 +528,8 @@ export function CreateInstance() {
             <button
               className="primary"
               disabled={
-                !modelId ||
+                !selectedModel ||
+                selectedModel.availability !== "available" ||
                 mutation.isPending ||
                 (placement.mode === "rpc" &&
                   !placement.devices.some((d) => d.worker_id))

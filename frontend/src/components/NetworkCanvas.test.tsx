@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Overview } from "./Overview";
+import { NetworkCanvas } from "./NetworkCanvas";
 import type { Node } from "../types";
 
 function node(id: string, changes: Partial<Node> = {}): Node {
@@ -43,7 +43,7 @@ function node(id: string, changes: Partial<Node> = {}): Node {
 }
 function render(nodes: Node[]) {
   return renderToStaticMarkup(
-    <Overview nodes={nodes} models={[]} instances={[]} loading={false} />,
+    <NetworkCanvas nodes={nodes} onSelect={() => {}} onAdd={() => {}} />,
   );
 }
 it("counts shared system RAM once, excluding stale, offline and unknown totals", () => {

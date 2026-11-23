@@ -39,7 +39,7 @@ export const useNodes = (poll = true) =>
     queryFn: () => api<{ nodes: Node[] }>("/nodes"),
     refetchInterval: poll ? 5000 : false,
   });
-export const useModels = () =>
+export const useModels = (poll = true) =>
   useQuery({
     queryKey: ["models"],
     queryFn: () =>
@@ -53,7 +53,7 @@ export const useModels = () =>
           message: string;
         }[];
       }>("/models"),
-    refetchInterval: 5000,
+    refetchInterval: poll ? 5000 : false,
   });
 export const useInstances = (poll = true) =>
   useQuery({

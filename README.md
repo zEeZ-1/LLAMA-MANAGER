@@ -1,6 +1,6 @@
-# AscNet · v3.1
+# AscNet · v3.2
 
-轻量的 llama.cpp 推理工作台，支持单机和 SSH 集中管理的多机 RPC。包含模型包自动发现、图文实例、图片对话、流式 Chat 和本地多会话。WebUI 借鉴 EXO 的深色中性色与黄色强调，提供节点拓扑、模型与实例卡片，以及可收起的会话 / 对话 / 资源三栏。
+轻量的 llama.cpp 推理工作台，支持单机和 SSH 集中管理的多机 RPC。包含模型包自动发现、图文实例、图片对话、流式 Chat 和本地多会话。WebUI 参考 EXO，采用没有页面导航栏的三栏工作空间：左侧会话列表，中间节点 / 对话，右侧实例与模型管理。
 
 生产运行只有一个 FastAPI 进程，直接提供 React 静态构建产物；每个实例单独启动一个普通模式 `llama-server`。管理层不加载模型权重，不依赖 PyTorch、Transformers、Redis 或常驻 Node 服务。
 
@@ -8,7 +8,7 @@ V2 已实现密码接入与自动密钥引导、主机指纹确认、远端配�
 
 V3 Image 增加独立模型目录、格式 / 类型识别、多模态实例和前后端图片链路。设计与边界见 [V3 开发设计](docs/development_v3.md)，实现及实际验证范围见 [V3 验证记录](docs/validation_v3.md)。
 
-v3.1 完成 AscNet 品牌与 WebUI 更新，保留 V3 图文链路和 SSH / RPC 操作。版本说明、数据兼容及验收范围见 [v3.1 设计与发布记录](docs/development_v3_1.md) 和 [验证记录](docs/validation_v3_1.md)。
+v3.2 重构为常驻三栏工作空间：点击中间节点进入控制详情，在右侧直接选择模型、填写参数并创建 / 删除实例，从左侧进入历史对话。创建草稿和生成任务在查看节点时保留。见 [v3.2 设计与发布记录](docs/development_v3_2.md) 和 [验证记录](docs/validation_v3_2.md)。[v3.1](docs/development_v3_1.md) 是此前的品牌与页面式界面版本。
 
 ## 快速开始
 

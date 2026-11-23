@@ -1,4 +1,5 @@
-import { MemoryBar } from "../components/ClusterPanel";
+import { MemoryBar, NetworkCanvas } from "../components/NetworkCanvas";
+import { useUI } from "../services/ui";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -14,6 +15,8 @@ import {
   Trash2,
   ShieldCheck,
   Pencil,
+  ArrowLeft,
+  MessageSquare,
 } from "lucide-react";
 import {
   api,
@@ -69,6 +72,12 @@ const operationNames: Record<string, string> = {
 
 export function Nodes() {
   const query = useNodes(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const ui = useUI();
+  const selectedNode = query.data?.nodes.find((n) => n.id === selectedNodeId);
+  useEffect(() => {
+    if (selectedNodeId && query.data && !selectedNode) setSelectedNodeId(null);
+  }, [selectedNodeId, selectedNode, query.data]);
   const client = useQueryClient();
   const [connect, setConnect] = useState<Node | "new" | null>(null);
   const [edit, setEdit] = useState<Node | null>(null);
@@ -85,7 +94,7 @@ export function Nodes() {
   const jobs = useQuery({
     queryKey: ["jobs"],
     queryFn: () => api<{ jobs: Job[] }>("/jobs"),
-    refetchInterval: 2000,
+    refetchInterval: ui.centerView === "nodes" ? 2000 : false,
   });
   const logs = useQuery({
     queryKey: ["worker-logs", logWorker?.id],
@@ -129,454 +138,515 @@ export function Nodes() {
   }
   return (
     <>
-      <div className="section-heading">
-        <span className="muted">控制端统一管理 · 远端仅运行 RPC</span>
-        <button className="primary" onClick={() => setConnect("new")}>
-          <Plus size={16} />
-          添加节点
-        </button>
-      </div>
-      {error && (
-        <div className="error" role="alert">
-          {error}
+      <header className="network-header">
+        <div className="network-heading">
+          {selectedNode && (
+            <button
+              className="icon"
+              aria-label="返回节点网络"
+              onClick={() => setSelectedNodeId(null)}
+            >
+              <ArrowLeft size={18} />
+            </button>
+          )}
+          <div>
+            <span className="eyebrow">
+              {selectedNode ? "NODE CONTROL" : "COMPUTE NETWORK"}
+            </span>
+            <h1>{selectedNode ? selectedNode.name : "计算网络"}</h1>
+          </div>
         </div>
-      )}
-      <div className="nodes-grid">
-        {query.data?.nodes.map((node) => (
-          <section key={node.id} className="node-card panel">
-            <div className="section-heading">
-              <div className="node-heading">
-                <div className="device-icon">
-                  <Network size={26} />
-                </div>
-                <div>
-                  <span className="node-role">
-                    {node.role === "controller" ? "控制节点" : "RPC 计算节点"}
-                  </span>
-                  <h2>{node.name}</h2>
-                  <span className="muted mono">
-                    {node.address || node.hostname}
-                  </span>
-                </div>
-              </div>
-              <span
-                className={`badge ${node.status === "online" ? "ready" : "stopped"}`}
-              >
-                {connectionNames[node.connection_state] ||
-                  node.connection_state}
-              </span>
-            </div>
-            <div className="node-specs">
-              <div>
-                <span>处理器</span>
-                <strong>{node.cpu_info.name}</strong>
-                <small>
-                  {node.cpu_info.logical_count ?? "—"} 逻辑核心 ·{" "}
-                  {node.architecture}
-                </small>
-              </div>
-              <div>
-                <span>系统内存</span>
-                <strong>{bytes(node.memory_info.total)}</strong>
-                <small>{bytes(node.memory_info.available)} 可用</small>
-                <MemoryBar node={node} />
-              </div>
-              <div>
-                <span>
-                  {node.role === "controller" ? "模型 / 实例" : "关联实例"}
-                </span>
-                <strong>
-                  {node.role === "controller" ? `${node.model_count} / ` : ""}
-                  {node.instance_count}
-                </strong>
-                <small>
-                  {node.role === "controller"
-                    ? `${node.ready_count} 个实例就绪`
-                    : "模型由控制主机提供"}
-                </small>
-              </div>
-            </div>
-            <div className="node-gpus">
-              {node.devices.map((d) => (
-                <div key={d.id}>
-                  <Cpu size={18} />
-                  <span>
-                    {d.name}
-                    <small className="device-caption">{gpuMemory(d)}</small>
-                  </span>
-                  <span className="muted">
-                    {d.compute_state === "ready"
-                      ? "计算就绪"
-                      : "计算能力待验证"}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {node.telemetry_stale && (
-              <div className="notice">
-                数据已过期 · 最近采样{" "}
-                {node.sampled_at
-                  ? new Date(node.sampled_at).toLocaleString()
-                  : "尚未采集"}
-              </div>
-            )}
-            {node.last_error && (
-              <div className="error">{node.last_error.message}</div>
-            )}
-            {node.auth_state?.warning && (
-              <div className="notice">{node.auth_state.warning}</div>
-            )}
-            {node.role === "rpc_worker" && (
-              <div className="notice" role="status">
-                {node.rpc_discovery?.state === "complete"
-                  ? node.rpc_discovery.count
-                    ? `已检测到 ${node.rpc_discovery.count} 个运行中的 RPC`
-                    : "未检测到运行中的 RPC，可新建 RPC"
-                  : node.rpc_discovery?.error?.message ||
-                    "SSH 连接成功后会自动检测 RPC"}
-                {node.rpc_discovery?.sampled_at && (
-                  <small>
-                    {" "}
-                    ·{" "}
-                    {new Date(
-                      node.rpc_discovery.sampled_at,
-                    ).toLocaleTimeString()}
-                  </small>
-                )}
-              </div>
-            )}
-            {details === node.id && (
-              <dl className="details">
-                <dt>硬件型号</dt>
-                <dd>{node.hardware_model || "型号未提供"}</dd>
-                <dt>Hostname</dt>
-                <dd>{node.hostname}</dd>
-                <dt>操作系统</dt>
-                <dd>{node.os}</dd>
-                <dt>CPU 使用率</dt>
-                <dd>{percent(node.cpu_info.usage_percent)}</dd>
-                <dt>内存使用率</dt>
-                <dd>{percent(node.memory_info.usage_percent)}</dd>
-                {node.devices.map((d) => (
-                  <div className="detail-device" key={d.id}>
-                    <dt>GPU / 驱动</dt>
-                    <dd>
-                      {d.name} / {d.driver || "未提供"}
-                    </dd>
-                    <dt>GPU 使用率</dt>
-                    <dd>{percent(d.properties.utilization_percent)}</dd>
+        <div className="network-header-actions">
+          {ui.chatRequest > 0 && (
+            <button
+              className="icon"
+              aria-label="返回当前对话"
+              onClick={() => useUI.setState({ centerView: "chat" })}
+            >
+              <MessageSquare size={17} />
+            </button>
+          )}
+          <button className="primary small" onClick={() => setConnect("new")}>
+            <Plus size={15} />
+            添加节点
+          </button>
+        </div>
+      </header>
+      <div className="node-workspace-scroll">
+        {query.error && (
+          <div className="error" role="alert">
+            {errorText(query.error)}
+            <button onClick={refresh}>重试</button>
+          </div>
+        )}
+        {query.isPending && <p className="notice">正在读取计算节点…</p>}
+        {!selectedNode && !query.isPending && (
+          <NetworkCanvas
+            nodes={query.data?.nodes || []}
+            onSelect={setSelectedNodeId}
+            onAdd={() => setConnect("new")}
+          />
+        )}
+        {error && (
+          <div className="error" role="alert">
+            {error}
+          </div>
+        )}
+        <div className="nodes-grid">
+          {query.data?.nodes
+            .filter((node) => node.id === selectedNodeId)
+            .map((node) => (
+              <section key={node.id} className="node-card panel">
+                <div className="section-heading">
+                  <div className="node-heading">
+                    <div className="device-icon">
+                      <Network size={26} />
+                    </div>
+                    <div>
+                      <span className="node-role">
+                        {node.role === "controller"
+                          ? "控制节点"
+                          : "RPC 计算节点"}
+                      </span>
+                      <h2>{node.name}</h2>
+                      <span className="muted mono">
+                        {node.address || node.hostname}
+                      </span>
+                    </div>
                   </div>
-                ))}
-                {node.ssh && (
-                  <>
-                    <dt>SSH 账户</dt>
-                    <dd>
-                      {node.ssh.username}@{node.address}:{node.ssh.port}
-                    </dd>
-                    <dt>主机指纹</dt>
-                    <dd className="mono">
-                      {node.identity?.ssh_host_key_fingerprint || "尚未核验"}
-                    </dd>
-                    <dt>后续认证</dt>
-                    <dd>
-                      {node.ssh.credential_id
-                        ? "已登记专用密钥"
-                        : "等待首次认证"}
-                    </dd>
-                  </>
-                )}
-                {Object.entries(node.inventory || {})
-                  .filter(([k]) => !["machine_id_hash"].includes(k))
-                  .map(([k, v]) => (
-                    <div className="detail-device" key={k}>
-                      <dt>{k}</dt>
-                      <dd>{v == null || v === "" ? "未提供" : String(v)}</dd>
+                  <span
+                    className={`badge ${node.status === "online" ? "ready" : "stopped"}`}
+                  >
+                    {connectionNames[node.connection_state] ||
+                      node.connection_state}
+                  </span>
+                </div>
+                <div className="node-specs">
+                  <div>
+                    <span>处理器</span>
+                    <strong>{node.cpu_info.name}</strong>
+                    <small>
+                      {node.cpu_info.logical_count ?? "—"} 逻辑核心 ·{" "}
+                      {node.architecture}
+                    </small>
+                  </div>
+                  <div>
+                    <span>系统内存</span>
+                    <strong>{bytes(node.memory_info.total)}</strong>
+                    <small>{bytes(node.memory_info.available)} 可用</small>
+                    <MemoryBar node={node} />
+                  </div>
+                  <div>
+                    <span>
+                      {node.role === "controller" ? "模型 / 实例" : "关联实例"}
+                    </span>
+                    <strong>
+                      {node.role === "controller"
+                        ? `${node.model_count} / `
+                        : ""}
+                      {node.instance_count}
+                    </strong>
+                    <small>
+                      {node.role === "controller"
+                        ? `${node.ready_count} 个实例就绪`
+                        : "模型由控制主机提供"}
+                    </small>
+                  </div>
+                </div>
+                <div className="node-gpus">
+                  {node.devices.map((d) => (
+                    <div key={d.id}>
+                      <Cpu size={18} />
+                      <span>
+                        {d.name}
+                        <small className="device-caption">{gpuMemory(d)}</small>
+                      </span>
+                      <span className="muted">
+                        {d.compute_state === "ready"
+                          ? "计算就绪"
+                          : "计算能力待验证"}
+                      </span>
                     </div>
                   ))}
-                <dt>最近采样</dt>
-                <dd>
-                  {node.sampled_at
-                    ? new Date(node.sampled_at).toLocaleString()
-                    : "尚未采集"}
-                </dd>
-              </dl>
-            )}
-            {node.rpc_workers?.map((worker) => (
-              <div className="worker-box" key={worker.id}>
-                <div className="section-heading">
-                  <strong>
-                    RPC · {worker.endpoint.host}:{worker.endpoint.port}
-                  </strong>
-                  <span
-                    className={`badge ${worker.state === "ready" ? "ready" : worker.state === "failed" ? "failed" : "stopped"}`}
-                  >
-                    {workerNames[worker.state] || worker.state}
-                  </span>
                 </div>
-                <p className="muted">
-                  {worker.origin === "existing"
-                    ? "检测到的已有 RPC"
-                    : "平台新建 RPC"}{" "}
-                  · {worker.service_name || "独立进程"} ·{" "}
-                  {worker.release_id || "版本未验证"} · 协议{" "}
-                  {worker.protocol_version || "待核验"} · RSS{" "}
-                  {bytes(worker.rss_bytes)}
-                  {worker.process_identity && (
-                    <> · PID {worker.process_identity.pid}</>
-                  )}
-                  {worker.client_count ? (
-                    <> · {worker.client_count} 个连接</>
-                  ) : null}
-                </p>
-                {worker.claim && (
+                {node.telemetry_stale && (
                   <div className="notice">
-                    {worker.claim.state === "quarantined"
-                      ? "占用待核对"
-                      : "实例占用"}{" "}
-                    · {worker.claim.instance_id}
+                    数据已过期 · 最近采样{" "}
+                    {node.sampled_at
+                      ? new Date(node.sampled_at).toLocaleString()
+                      : "尚未采集"}
                   </div>
                 )}
-                {worker.last_error && (
-                  <div className="error">{worker.last_error.message}</div>
+                {node.last_error && (
+                  <div className="error">{node.last_error.message}</div>
                 )}
-                <WorkerJobStatus job={workerJobs.get(worker.id)} />
-                <div className="row-actions worker-actions">
-                  {!worker.release_id && worker.origin !== "existing" && (
-                    <button
-                      className="small"
-                      disabled={working || !!worker.claim}
-                      onClick={() => setEditingWorker({ node, worker })}
-                    >
-                      修改 RPC 配置
-                    </button>
-                  )}
-                  {worker.origin !== "existing" && (
-                    <button
-                      className="small"
-                      disabled={working || !!worker.claim}
-                      onClick={() => setDeployment(worker)}
-                    >
-                      {worker.management_mode === "observed"
-                        ? "验证并接管"
-                        : "部署 / 更新"}
-                    </button>
-                  )}
-                  <button
-                    className="small"
-                    disabled={
-                      working ||
-                      !!worker.claim ||
-                      !worker.release_id ||
-                      worker.management_mode !== "managed" ||
-                      worker.can_start === false
-                    }
-                    onClick={() =>
-                      void action(() =>
-                        api(`/workers/${worker.id}/start`, {
-                          method: "POST",
-                          body: JSON.stringify({
-                            idempotency_key: crypto.randomUUID(),
-                          }),
-                        }),
-                      )
-                    }
-                  >
-                    <Play size={14} />
-                    启动
-                  </button>
-                  <button
-                    className="small"
-                    disabled={
-                      working ||
-                      !!worker.claim ||
-                      worker.management_mode !== "managed" ||
-                      !worker.release_id ||
-                      worker.state === "busy" ||
-                      !worker.service_name
-                    }
-                    onClick={() =>
-                      void action(() =>
-                        api(`/workers/${worker.id}/stop`, {
-                          method: "POST",
-                          body: JSON.stringify({
-                            idempotency_key: crypto.randomUUID(),
-                          }),
-                        }),
-                      )
-                    }
-                  >
-                    <Square size={14} />
-                    停止
-                  </button>
-                  <button
-                    className="small"
-                    onClick={() => setLogWorker(worker)}
-                  >
-                    <Terminal size={14} />
-                    日志
-                  </button>
-                  {worker.claim?.state === "quarantined" && (
-                    <button
-                      className="small"
-                      disabled={working}
-                      onClick={() =>
-                        void action(() =>
-                          api(`/workers/${worker.id}/reconcile`, {
-                            method: "POST",
-                          }),
-                        )
-                      }
-                    >
-                      核对占用
-                    </button>
-                  )}
-                  {worker.state === "stopped" &&
-                    worker.management_mode === "managed" && (
+                {node.auth_state?.warning && (
+                  <div className="notice">{node.auth_state.warning}</div>
+                )}
+                {node.role === "rpc_worker" && (
+                  <div className="notice" role="status">
+                    {node.rpc_discovery?.state === "complete"
+                      ? node.rpc_discovery.count
+                        ? `已检测到 ${node.rpc_discovery.count} 个运行中的 RPC`
+                        : "未检测到运行中的 RPC，可新建 RPC"
+                      : node.rpc_discovery?.error?.message ||
+                        "SSH 连接成功后会自动检测 RPC"}
+                    {node.rpc_discovery?.sampled_at && (
+                      <small>
+                        {" "}
+                        ·{" "}
+                        {new Date(
+                          node.rpc_discovery.sampled_at,
+                        ).toLocaleTimeString()}
+                      </small>
+                    )}
+                  </div>
+                )}
+                {details === node.id && (
+                  <dl className="details">
+                    <dt>硬件型号</dt>
+                    <dd>{node.hardware_model || "型号未提供"}</dd>
+                    <dt>Hostname</dt>
+                    <dd>{node.hostname}</dd>
+                    <dt>操作系统</dt>
+                    <dd>{node.os}</dd>
+                    <dt>CPU 使用率</dt>
+                    <dd>{percent(node.cpu_info.usage_percent)}</dd>
+                    <dt>内存使用率</dt>
+                    <dd>{percent(node.memory_info.usage_percent)}</dd>
+                    {node.devices.map((d) => (
+                      <div className="detail-device" key={d.id}>
+                        <dt>GPU / 驱动</dt>
+                        <dd>
+                          {d.name} / {d.driver || "未提供"}
+                        </dd>
+                        <dt>GPU 使用率</dt>
+                        <dd>{percent(d.properties.utilization_percent)}</dd>
+                      </div>
+                    ))}
+                    {node.ssh && (
+                      <>
+                        <dt>SSH 账户</dt>
+                        <dd>
+                          {node.ssh.username}@{node.address}:{node.ssh.port}
+                        </dd>
+                        <dt>主机指纹</dt>
+                        <dd className="mono">
+                          {node.identity?.ssh_host_key_fingerprint ||
+                            "尚未核验"}
+                        </dd>
+                        <dt>后续认证</dt>
+                        <dd>
+                          {node.ssh.credential_id
+                            ? "已登记专用密钥"
+                            : "等待首次认证"}
+                        </dd>
+                      </>
+                    )}
+                    {Object.entries(node.inventory || {})
+                      .filter(([k]) => !["machine_id_hash"].includes(k))
+                      .map(([k, v]) => (
+                        <div className="detail-device" key={k}>
+                          <dt>{k}</dt>
+                          <dd>
+                            {v == null || v === "" ? "未提供" : String(v)}
+                          </dd>
+                        </div>
+                      ))}
+                    <dt>最近采样</dt>
+                    <dd>
+                      {node.sampled_at
+                        ? new Date(node.sampled_at).toLocaleString()
+                        : "尚未采集"}
+                    </dd>
+                  </dl>
+                )}
+                {node.rpc_workers?.map((worker) => (
+                  <div className="worker-box" key={worker.id}>
+                    <div className="section-heading">
+                      <strong>
+                        RPC · {worker.endpoint.host}:{worker.endpoint.port}
+                      </strong>
+                      <span
+                        className={`badge ${worker.state === "ready" ? "ready" : worker.state === "failed" ? "failed" : "stopped"}`}
+                      >
+                        {workerNames[worker.state] || worker.state}
+                      </span>
+                    </div>
+                    <p className="muted">
+                      {worker.origin === "existing"
+                        ? "检测到的已有 RPC"
+                        : "平台新建 RPC"}{" "}
+                      · {worker.service_name || "独立进程"} ·{" "}
+                      {worker.release_id || "版本未验证"} · 协议{" "}
+                      {worker.protocol_version || "待核验"} · RSS{" "}
+                      {bytes(worker.rss_bytes)}
+                      {worker.process_identity && (
+                        <> · PID {worker.process_identity.pid}</>
+                      )}
+                      {worker.client_count ? (
+                        <> · {worker.client_count} 个连接</>
+                      ) : null}
+                    </p>
+                    {worker.claim && (
+                      <div className="notice">
+                        {worker.claim.state === "quarantined"
+                          ? "占用待核对"
+                          : "实例占用"}{" "}
+                        · {worker.claim.instance_id}
+                      </div>
+                    )}
+                    {worker.last_error && (
+                      <div className="error">{worker.last_error.message}</div>
+                    )}
+                    <WorkerJobStatus job={workerJobs.get(worker.id)} />
+                    <div className="row-actions worker-actions">
+                      {!worker.release_id && worker.origin !== "existing" && (
+                        <button
+                          className="small"
+                          disabled={working || !!worker.claim}
+                          onClick={() => setEditingWorker({ node, worker })}
+                        >
+                          修改 RPC 配置
+                        </button>
+                      )}
+                      {worker.origin !== "existing" && (
+                        <button
+                          className="small"
+                          disabled={working || !!worker.claim}
+                          onClick={() => setDeployment(worker)}
+                        >
+                          {worker.management_mode === "observed"
+                            ? "验证并接管"
+                            : "部署 / 更新"}
+                        </button>
+                      )}
                       <button
                         className="small"
-                        disabled={working || !!worker.claim}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              "仅清理该 worker 所属的磁盘张量缓存？下次加载可能需要重新传输。",
-                            )
+                        disabled={
+                          working ||
+                          !!worker.claim ||
+                          !worker.release_id ||
+                          worker.management_mode !== "managed" ||
+                          worker.can_start === false
+                        }
+                        onClick={() =>
+                          void action(() =>
+                            api(`/workers/${worker.id}/start`, {
+                              method: "POST",
+                              body: JSON.stringify({
+                                idempotency_key: crypto.randomUUID(),
+                              }),
+                            }),
                           )
+                        }
+                      >
+                        <Play size={14} />
+                        启动
+                      </button>
+                      <button
+                        className="small"
+                        disabled={
+                          working ||
+                          !!worker.claim ||
+                          worker.management_mode !== "managed" ||
+                          !worker.release_id ||
+                          worker.state === "busy" ||
+                          !worker.service_name
+                        }
+                        onClick={() =>
+                          void action(() =>
+                            api(`/workers/${worker.id}/stop`, {
+                              method: "POST",
+                              body: JSON.stringify({
+                                idempotency_key: crypto.randomUUID(),
+                              }),
+                            }),
+                          )
+                        }
+                      >
+                        <Square size={14} />
+                        停止
+                      </button>
+                      <button
+                        className="small"
+                        onClick={() => setLogWorker(worker)}
+                      >
+                        <Terminal size={14} />
+                        日志
+                      </button>
+                      {worker.claim?.state === "quarantined" && (
+                        <button
+                          className="small"
+                          disabled={working}
+                          onClick={() =>
                             void action(() =>
-                              api(`/workers/${worker.id}/cache/clean`, {
+                              api(`/workers/${worker.id}/reconcile`, {
                                 method: "POST",
-                                body: "{}",
+                              }),
+                            )
+                          }
+                        >
+                          核对占用
+                        </button>
+                      )}
+                      {worker.state === "stopped" &&
+                        worker.management_mode === "managed" && (
+                          <button
+                            className="small"
+                            disabled={working || !!worker.claim}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  "仅清理该 worker 所属的磁盘张量缓存？下次加载可能需要重新传输。",
+                                )
+                              )
+                                void action(() =>
+                                  api(`/workers/${worker.id}/cache/clean`, {
+                                    method: "POST",
+                                    body: "{}",
+                                  }),
+                                );
+                            }}
+                          >
+                            清理缓存
+                          </button>
+                        )}
+                      <button
+                        className="small danger"
+                        disabled={
+                          working ||
+                          !!worker.claim ||
+                          worker.can_delete === false
+                        }
+                        onClick={() => {
+                          const message =
+                            worker.origin === "existing"
+                              ? `删除 ${worker.endpoint.host}:${worker.endpoint.port} 的 RPC？将停止并停用对应服务，外部程序文件保留。${worker.client_count ? `当前有 ${worker.client_count} 个连接，会被断开。` : ""}`
+                              : worker.release_id
+                                ? `删除 ${worker.endpoint.host}:${worker.endpoint.port} 的 RPC？将停止服务并删除其专属程序和缓存，模型源文件保留。`
+                                : "删除此尚未部署的 RPC 配置？";
+                          if (window.confirm(message))
+                            void action(() =>
+                              api(`/workers/${worker.id}`, {
+                                method: "DELETE",
+                                body: JSON.stringify({
+                                  process_identity: worker.process_identity,
+                                  force: !!worker.client_count,
+                                }),
                               }),
                             );
                         }}
                       >
-                        清理缓存
+                        <Trash2 size={14} />
+                        删除 RPC
                       </button>
-                    )}
+                    </div>
+                  </div>
+                ))}
+                <div className="card-footer">
                   <button
-                    className="small danger"
-                    disabled={
-                      working || !!worker.claim || worker.can_delete === false
+                    onClick={() =>
+                      setDetails(details === node.id ? null : node.id)
                     }
-                    onClick={() => {
-                      const message =
-                        worker.origin === "existing"
-                          ? `删除 ${worker.endpoint.host}:${worker.endpoint.port} 的 RPC？将停止并停用对应服务，外部程序文件保留。${worker.client_count ? `当前有 ${worker.client_count} 个连接，会被断开。` : ""}`
-                          : worker.release_id
-                            ? `删除 ${worker.endpoint.host}:${worker.endpoint.port} 的 RPC？将停止服务并删除其专属程序和缓存，模型源文件保留。`
-                            : "删除此尚未部署的 RPC 配置？";
-                      if (window.confirm(message))
-                        void action(() =>
-                          api(`/workers/${worker.id}`, {
-                            method: "DELETE",
-                            body: JSON.stringify({
-                              process_identity: worker.process_identity,
-                              force: !!worker.client_count,
+                  >
+                    {details === node.id ? "收起详情" : "查看详情"}
+                  </button>
+                  {node.role === "rpc_worker" && (
+                    <>
+                      <button
+                        disabled={working}
+                        onClick={() => setConnect(node)}
+                      >
+                        <Link size={15} />
+                        连接
+                      </button>
+                      <button
+                        className="icon"
+                        aria-label={`编辑 ${node.name}`}
+                        onClick={() => setEdit(node)}
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        className="icon"
+                        disabled={working || node.connection_state !== "online"}
+                        aria-label={`刷新 ${node.name}`}
+                        onClick={() =>
+                          void action(() =>
+                            api(`/nodes/${node.id}/refresh`, {
+                              method: "POST",
                             }),
-                          }),
-                        );
-                    }}
-                  >
-                    <Trash2 size={14} />
-                    删除 RPC
-                  </button>
+                          )
+                        }
+                      >
+                        <RefreshCw size={16} />
+                      </button>
+                      {
+                        <button
+                          className="primary"
+                          disabled={node.connection_state !== "online"}
+                          onClick={() => setWorkerNode(node)}
+                        >
+                          <Plus size={15} />
+                          新建 RPC
+                        </button>
+                      }
+                      <button
+                        className="icon danger"
+                        disabled={working}
+                        aria-label={`移除 ${node.name}`}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `移除节点「${node.name}」登记？不会卸载远端文件，运行或未知状态的 RPC 会阻止移除。`,
+                            )
+                          )
+                            void action(() =>
+                              api(`/nodes/${node.id}`, { method: "DELETE" }),
+                            );
+                        }}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </>
+                  )}
                 </div>
-              </div>
+              </section>
             ))}
-            <div className="card-footer">
-              <button
-                onClick={() => setDetails(details === node.id ? null : node.id)}
-              >
-                {details === node.id ? "收起详情" : "查看详情"}
-              </button>
-              {node.role === "rpc_worker" && (
-                <>
-                  <button disabled={working} onClick={() => setConnect(node)}>
-                    <Link size={15} />
-                    连接
-                  </button>
+        </div>
+        {!!activeJobs.length && (
+          <section className="panel jobs-panel">
+            <div className="section-heading">
+              <h2>最近节点任务</h2>
+              <span className="muted">认证信息不保存</span>
+            </div>
+            {activeJobs.map((job) => (
+              <div className="job" key={job.id}>
+                <div>
+                  <strong>
+                    {operationNames[job.operation] || "节点任务"} ·{" "}
+                    {jobNames[job.state] || job.state}
+                  </strong>
+                  <p className="muted">{job.error?.message || job.message} </p>
+                </div>
+                {["running", "queued"].includes(job.state) && (
                   <button
-                    className="icon"
-                    aria-label={`编辑 ${node.name}`}
-                    onClick={() => setEdit(node)}
-                  >
-                    <Pencil size={16} />
-                  </button>
-                  <button
-                    className="icon"
-                    disabled={working || node.connection_state !== "online"}
-                    aria-label={`刷新 ${node.name}`}
+                    className="small"
                     onClick={() =>
                       void action(() =>
-                        api(`/nodes/${node.id}/refresh`, { method: "POST" }),
+                        api(`/jobs/${job.id}/cancel`, { method: "POST" }),
                       )
                     }
                   >
-                    <RefreshCw size={16} />
+                    取消
                   </button>
-                  {
-                    <button
-                      className="primary"
-                      disabled={node.connection_state !== "online"}
-                      onClick={() => setWorkerNode(node)}
-                    >
-                      <Plus size={15} />
-                      新建 RPC
-                    </button>
-                  }
-                  <button
-                    className="icon danger"
-                    disabled={working}
-                    aria-label={`移除 ${node.name}`}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `移除节点「${node.name}」登记？不会卸载远端文件，运行或未知状态的 RPC 会阻止移除。`,
-                        )
-                      )
-                        void action(() =>
-                          api(`/nodes/${node.id}`, { method: "DELETE" }),
-                        );
-                    }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </>
-              )}
-            </div>
-          </section>
-        ))}
-      </div>
-      {!!activeJobs.length && (
-        <section className="panel jobs-panel">
-          <div className="section-heading">
-            <h2>最近节点任务</h2>
-            <span className="muted">认证信息不保存</span>
-          </div>
-          {activeJobs.map((job) => (
-            <div className="job" key={job.id}>
-              <div>
-                <strong>
-                  {operationNames[job.operation] || "节点任务"} ·{" "}
-                  {jobNames[job.state] || job.state}
-                </strong>
-                <p className="muted">{job.error?.message || job.message} </p>
+                )}
               </div>
-              {["running", "queued"].includes(job.state) && (
-                <button
-                  className="small"
-                  onClick={() =>
-                    void action(() =>
-                      api(`/jobs/${job.id}/cancel`, { method: "POST" }),
-                    )
-                  }
-                >
-                  取消
-                </button>
-              )}
-            </div>
-          ))}
-        </section>
-      )}
+            ))}
+          </section>
+        )}
+      </div>
       {edit && (
         <EditNodeModal
           node={edit}

@@ -106,7 +106,7 @@ def create_app(settings: Settings | None = None):
                     lock.close()
 
     app = FastAPI(
-        title="AscNet", version="0.3.1", lifespan=lifespan
+        title="AscNet", version="0.3.2", lifespan=lifespan
     )
     app.add_middleware(
         RequestLimits,
@@ -135,7 +135,7 @@ def create_app(settings: Settings | None = None):
     async def health():
         return {
             "status": "ok",
-            "version": "0.3.1",
+            "version": "0.3.2",
             "managed_lifecycle": supervised(),
             "ssh_connections": len(app.state.remote.ssh.masters),
             "runtime_available": cfg.runtime.llama_cpp.server_binary.is_file(),
