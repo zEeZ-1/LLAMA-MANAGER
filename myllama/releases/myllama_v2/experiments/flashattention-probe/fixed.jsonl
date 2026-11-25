@@ -1,0 +1,13 @@
+{"q":1,"kv":128,"capacity":256,"type":"q8_0","splits":1,"ggml_us":45.1089,"fa2_kernel_us":8.5568,"fa2_compat_us":17.5427,"nrmse":0.005310,"max_abs_error":0.003822}
+{"q":2,"kv":128,"capacity":256,"type":"q8_0","splits":0,"ggml_us":24.5224,"fa2_kernel_us":26.6219,"fa2_compat_us":35.7259,"nrmse":0.000550,"max_abs_error":0.000366}
+{"q":7,"kv":128,"capacity":256,"type":"q8_0","splits":0,"ggml_us":37.0651,"fa2_kernel_us":26.7602,"fa2_compat_us":37.3988,"nrmse":0.000748,"max_abs_error":0.001021}
+{"q":128,"kv":128,"capacity":256,"type":"q8_0","splits":0,"ggml_us":320.0269,"fa2_kernel_us":51.9337,"fa2_compat_us":147.9719,"nrmse":0.000503,"max_abs_error":0.002086}
+{"q":1,"kv":1024,"capacity":1024,"type":"q8_0","splits":2,"ggml_us":131.5803,"fa2_kernel_us":41.6199,"fa2_compat_us":113.0978,"nrmse":0.005471,"max_abs_error":0.001167}
+{"q":2,"kv":1024,"capacity":1024,"type":"q8_0","splits":0,"ggml_us":107.7180,"fa2_kernel_us":140.8229,"fa2_compat_us":208.5658,"nrmse":0.000763,"max_abs_error":0.000242}
+{"q":7,"kv":1024,"capacity":1024,"type":"q8_0","splits":0,"ggml_us":133.2954,"fa2_kernel_us":142.2369,"fa2_compat_us":212.6152,"nrmse":0.001280,"max_abs_error":0.000481}
+{"q":128,"kv":1024,"capacity":1024,"type":"q8_0","splits":0,"ggml_us":757.1104,"fa2_kernel_us":330.0258,"fa2_compat_us":439.4696,"nrmse":0.001689,"max_abs_error":0.001146}
+{"q":1,"kv":4096,"capacity":4096,"type":"q8_0","splits":2,"ggml_us":502.6900,"fa2_kernel_us":186.6882,"fa2_compat_us":446.5130,"nrmse":0.005543,"max_abs_error":0.000767}
+{"q":2,"kv":4096,"capacity":4096,"type":"q8_0","splits":0,"ggml_us":450.1446,"fa2_kernel_us":687.7455,"fa2_compat_us":803.9898,"nrmse":0.001269,"max_abs_error":0.000173}
+{"q":7,"kv":4096,"capacity":4096,"type":"q8_0","splits":0,"ggml_us":493.3051,"fa2_kernel_us":703.4687,"fa2_compat_us":804.7647,"nrmse":0.002375,"max_abs_error":0.000714}
+{"q":128,"kv":4096,"capacity":4096,"type":"q8_0","splits":0,"ggml_us":2575.4689,"fa2_kernel_us":1276.9450,"fa2_compat_us":1609.6433,"nrmse":0.003324,"max_abs_error":0.000980}
+{"q":1,"kv":16384,"capacity":16384,"type":"q8_0","splits":2,"ggml_us":1954.9788,"fa2_kernel_us":738.4810,"fa2_compat_us":1770.1921,"nrmse":0.005333,"max_abs_error":0.000289}

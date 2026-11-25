@@ -1,0 +1,18 @@
+[
+  [
+    "baseline-e",
+    null
+  ],
+  [
+    "hybrid-a",
+    "overlay-hybrid.so"
+  ],
+  [
+    "baseline-f",
+    null
+  ],
+  [
+    "hybrid-b",
+    "overlay-hybrid.so"
+  ]
+]

@@ -1,0 +1,42 @@
+{
+  "same_ubatch_512": {
+    "35": {
+      "prefill_change_pct": -26.18129613528435,
+      "decode_change_pct": 0.9668858964668514,
+      "ttft_delta_s": 0.2300612800027011,
+      "wall_delta_s": 0.3064389600112918,
+      "output_token_hashes_match": true
+    },
+    "128": {
+      "prefill_change_pct": 18.86753565131256,
+      "decode_change_pct": 1.4864666422695905,
+      "ttft_delta_s": -0.20105403199704597,
+      "wall_delta_s": -0.24954051199165406,
+      "output_token_hashes_match": true
+    },
+    "4096": {
+      "prefill_change_pct": 0.392963924257983,
+      "decode_change_pct": -4.959416858101728,
+      "ttft_delta_s": -0.04785623999487143,
+      "wall_delta_s": 0.1374115200014785,
+      "output_token_hashes_match": true
+    }
+  },
+  "cuda_routes": {
+    "full-u512.log": {
+      "Q4_K gate/up prefetch mode 3 active": true,
+      "SM87 experiment active for ggml type 12": true,
+      "SM87 experiment active for ggml type 14": true
+    },
+    "full-u512-journal-192.168.50.11.log": {
+      "Q4_K gate/up prefetch mode 3 active": true,
+      "SM87 experiment active for ggml type 12": true,
+      "SM87 experiment active for ggml type 14": true
+    },
+    "full-u512-journal-192.168.50.12.log": {
+      "Q4_K gate/up prefetch mode 3 active": true,
+      "SM87 experiment active for ggml type 12": true,
+      "SM87 experiment active for ggml type 14": true
+    }
+  }
+}

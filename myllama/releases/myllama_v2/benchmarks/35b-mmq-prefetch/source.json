@@ -1,0 +1,14 @@
+{
+  "type": "file",
+  "oid": "b56522115a9c90c0186310f0aedb265596f75184",
+  "size": 17791661888,
+  "lfs": {
+    "oid": "1a56509a1c46de8125c369b0c670ea75e7cd5b51867117f6c4007dc69c5cc6f7",
+    "size": 17791661888,
+    "pointerSize": 136
+  },
+  "xetHash": "581e4593fc815a1009d529707d572a77cbfbf7643c937b679b47c433763f72f8",
+  "path": "Qwen_Qwen3.5-35B-A3B-IQ3_M.gguf",
+  "repository": "bartowski/Qwen_Qwen3.5-35B-A3B-GGUF",
+  "revision": "3d2a22d4eb631b9c8fd2be94599dc2fd84b4a595"
+}

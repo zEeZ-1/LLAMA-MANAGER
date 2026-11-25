@@ -1,0 +1,128 @@
+{
+  "control": {
+    "Duration": {
+      "value": "29337376",
+      "unit": "ns"
+    },
+    "No Eligible": {
+      "value": "41.19",
+      "unit": "%"
+    },
+    "Registers Per Thread": {
+      "value": "255",
+      "unit": "register/thread"
+    },
+    "Shared Memory Configuration Size": {
+      "value": "102400",
+      "unit": "byte"
+    },
+    "Driver Shared Memory Per Block": {
+      "value": "1024",
+      "unit": "byte/block"
+    },
+    "Dynamic Shared Memory Per Block": {
+      "value": "38400",
+      "unit": "byte/block"
+    },
+    "Static Shared Memory Per Block": {
+      "value": "0",
+      "unit": "byte/block"
+    },
+    "Block Limit Registers": {
+      "value": "2",
+      "unit": "block"
+    },
+    "Block Limit Shared Mem": {
+      "value": "2",
+      "unit": "block"
+    },
+    "Achieved Occupancy": {
+      "value": "16.66",
+      "unit": "%"
+    }
+  },
+  "async-ca": {
+    "Duration": {
+      "value": "28169632",
+      "unit": "ns"
+    },
+    "No Eligible": {
+      "value": "39.92",
+      "unit": "%"
+    },
+    "Registers Per Thread": {
+      "value": "254",
+      "unit": "register/thread"
+    },
+    "Shared Memory Configuration Size": {
+      "value": "102400",
+      "unit": "byte"
+    },
+    "Driver Shared Memory Per Block": {
+      "value": "1024",
+      "unit": "byte/block"
+    },
+    "Dynamic Shared Memory Per Block": {
+      "value": "47616",
+      "unit": "byte/block"
+    },
+    "Static Shared Memory Per Block": {
+      "value": "0",
+      "unit": "byte/block"
+    },
+    "Block Limit Registers": {
+      "value": "2",
+      "unit": "block"
+    },
+    "Block Limit Shared Mem": {
+      "value": "2",
+      "unit": "block"
+    },
+    "Achieved Occupancy": {
+      "value": "16.66",
+      "unit": "%"
+    }
+  },
+  "l2-hint": {
+    "Duration": {
+      "value": "27987680",
+      "unit": "ns"
+    },
+    "No Eligible": {
+      "value": "38.02",
+      "unit": "%"
+    },
+    "Registers Per Thread": {
+      "value": "254",
+      "unit": "register/thread"
+    },
+    "Shared Memory Configuration Size": {
+      "value": "102400",
+      "unit": "byte"
+    },
+    "Driver Shared Memory Per Block": {
+      "value": "1024",
+      "unit": "byte/block"
+    },
+    "Dynamic Shared Memory Per Block": {
+      "value": "38400",
+      "unit": "byte/block"
+    },
+    "Static Shared Memory Per Block": {
+      "value": "0",
+      "unit": "byte/block"
+    },
+    "Block Limit Registers": {
+      "value": "2",
+      "unit": "block"
+    },
+    "Block Limit Shared Mem": {
+      "value": "2",
+      "unit": "block"
+    },
+    "Achieved Occupancy": {
+      "value": "16.65",
+      "unit": "%"
+    }
+  }
+}

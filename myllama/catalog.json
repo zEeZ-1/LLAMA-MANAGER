@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "latest": "myllama_v2",
+  "releases": [
+    {
+      "name": "myllama_v1",
+      "date": "2026-11-22",
+      "llama_cpp_commit": "9214bdb554544c35e4a9e2c2e8b75d8cfee330ab",
+      "platform": {
+        "arch": "aarch64",
+        "sm": 87,
+        "cuda": "13.2",
+        "l4t": "R39.2.1"
+      },
+      "directory": "releases/myllama_v1",
+      "github_release": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/tag/myllama_v1",
+      "runtime": {
+        "filename": "myllama_v1-runtime.tar.gz",
+        "size_bytes": 56168437,
+        "sha256": "f22192a29014474a6555d43c2aa7d5af836f51c2ffe050edf5629c0bd2956d1b",
+        "url": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/download/myllama_v1/myllama_v1-runtime.tar.gz",
+        "checksum_url": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/download/myllama_v1/myllama_v1-runtime.tar.gz.sha256",
+        "includes_model_weights": false
+      }
+    },
+    {
+      "name": "myllama_v2",
+      "date": "2026-11-24",
+      "llama_cpp_commit": "9214bdb554544c35e4a9e2c2e8b75d8cfee330ab",
+      "platform": {
+        "arch": "aarch64",
+        "sm": 87,
+        "cuda": "13.2",
+        "l4t": "R39.2.1"
+      },
+      "directory": "releases/myllama_v2",
+      "github_release": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/tag/myllama_v2",
+      "runtime": {
+        "filename": "myllama_v2-runtime.tar.gz",
+        "size_bytes": 158675107,
+        "sha256": "bd8e0a696ec84ddfde8149c510bc42a054eb218a670dae520d99ddbad0408cb4",
+        "url": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/download/myllama_v2/myllama_v2-runtime.tar.gz",
+        "checksum_url": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/download/myllama_v2/myllama_v2-runtime.tar.gz.sha256",
+        "includes_model_weights": false
+      }
+    }
+  ]
+}

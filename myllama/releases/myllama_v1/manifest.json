@@ -1,0 +1,10 @@
+{
+  "name": "myllama_v1",
+  "date": "2026-11-22",
+  "llama_cpp_commit": "9214bdb554544c35e4a9e2c2e8b75d8cfee330ab",
+  "platform": {"arch": "aarch64", "sm": 87, "cuda": "13.2", "l4t": "R39.2.1"},
+  "target": {"file": "models/Qwen3-14B-Q4_K_M.gguf", "revision": "530227a7d994db8eca5ab5ced2fb692b614357fd"},
+  "draft": {"file": "models/Qwen3-14B-DSpark-Q4_K_M.gguf", "revision": "0b33448035642fcd8386c6b6a2a24a8d65a9ef8a", "type": "draft-dspark", "max_candidates": 6, "min_confidence": 0},
+  "runtime": {"layer_split": [14, 14, 13], "parallel": 1, "context": 1024, "batch": 512, "ubatch": 128, "kv": "q8_0", "mmvq": "bin/overlay-hybrid.so", "cuda_graphs": true, "flash_attention": true},
+  "benchmark": {"gpu_hz": 1020000000, "mode": "MAXN_SUPER", "temperature": 0, "results": "benchmarks/fixed-1020mhz.jsonl"}
+}

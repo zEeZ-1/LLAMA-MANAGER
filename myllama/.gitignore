@@ -1,0 +1,16 @@
+# Native runtimes are distributed as GitHub Release assets.
+/releases/**/bin/
+/releases/**/*.so
+/releases/**/*.so.*
+/releases/**/*.bin
+/releases/**/*.tar.gz
+/releases/**/*.tar
+/releases/**/*.zip
+/releases/**/models/
+/releases/**/*.gguf
+/releases/**/probe
+/releases/**/probe-causal
+/releases/**/moe-op-bench
+/releases/**/expert-rpc-ab
+__pycache__/
+*.pyc

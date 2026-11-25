@@ -1,0 +1,121 @@
+{
+  "name": "myllama_v2",
+  "date": "2026-11-24",
+  "base_release": "myllama_v1",
+  "llama_cpp_commit": "9214bdb554544c35e4a9e2c2e8b75d8cfee330ab",
+  "platform": {
+    "arch": "aarch64",
+    "sm": 87,
+    "cuda": "13.2",
+    "l4t": "R39.2.1"
+  },
+  "default_profile": "35b-prefill",
+  "engine_preload": "bin/overlay-hybrid.so",
+  "default_experiment": "none",
+  "profiles": {
+    "35b-prefill": {
+      "model": "Qwen_Qwen3.5-35B-A3B-IQ3_M.gguf",
+      "device_order": [
+        "RPC0",
+        "CUDA0",
+        "RPC1"
+      ],
+      "batch": 4096,
+      "ubatch": 1024,
+      "draft_ubatch": 256,
+      "speculative": "draft-mtp",
+      "split": [
+        13.5,
+        15,
+        13.5
+      ],
+      "prefill_tokens_s": 418.69,
+      "ttft_s": 9.791,
+      "decode_tokens_s": 14.779,
+      "wall_4k_out128_s": 18.413
+    },
+    "35b-full": {
+      "model": "Qwen_Qwen3.5-35B-A3B-IQ3_M.gguf",
+      "device_order": [
+        "RPC0",
+        "RPC1",
+        "CUDA0"
+      ],
+      "batch": 4096,
+      "ubatch": 1024,
+      "draft_ubatch": 256,
+      "speculative": "draft-mtp",
+      "split": [
+        13.5,
+        15,
+        13.5
+      ],
+      "prefill_tokens_s": 393.727,
+      "ttft_s": 10.421,
+      "decode_tokens_s": 17.207,
+      "wall_4k_out128_s": 17.512
+    },
+    "14b-dspark": {
+      "target": {
+        "file": "models/Qwen3-14B-Q4_K_M.gguf",
+        "revision": "530227a7d994db8eca5ab5ced2fb692b614357fd"
+      },
+      "draft": {
+        "file": "models/Qwen3-14B-DSpark-Q4_K_M.gguf",
+        "revision": "0b33448035642fcd8386c6b6a2a24a8d65a9ef8a",
+        "type": "draft-dspark",
+        "max_candidates": 6,
+        "min_confidence": 0
+      },
+      "runtime": {
+        "layer_split": [
+          14,
+          14,
+          13
+        ],
+        "parallel": 1,
+        "context": 1024,
+        "batch": 512,
+        "ubatch": 128,
+        "kv": "q8_0",
+        "mmvq": "bin/overlay-hybrid.so",
+        "cuda_graphs": true,
+        "flash_attention": true
+      }
+    }
+  },
+  "runtime_experiments": [
+    "native",
+    "l2-prefetch",
+    "async-ca",
+    "async-cg",
+    "mmq-layout64",
+    "mmq-layout64-l2",
+    "mmq-j24",
+    "iq3s-fusion",
+    "mtp-kv-only",
+    "q6-row4"
+  ],
+  "benchmarks": {
+    "input_tokens": 4096,
+    "prefill_runs": 3,
+    "output_tokens": 128,
+    "full_request_runs": 1,
+    "prompt_cache": false,
+    "hardware": "three Jetson Orin Nano"
+  },
+  "package_smoke": {
+    "profile": "35b-prefill",
+    "input_tokens": 4096,
+    "output_tokens": 8,
+    "rpc_endpoints": [
+      "192.168.50.12:50052",
+      "192.168.50.11:50052"
+    ],
+    "needle_prefix_match": true,
+    "mtp_accepted": 4,
+    "ttft_s": 10.085360159981064,
+    "prefill_tokens_s": 407.4398354802508,
+    "log": "benchmarks/35b/v2-smoke.log"
+  }
+}

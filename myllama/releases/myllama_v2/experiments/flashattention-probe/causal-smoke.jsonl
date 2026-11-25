@@ -1,0 +1,6 @@
+{"q":2,"kv":128,"capacity":256,"type":"q8_0","splits":0,"ggml_us":24.4716,"fa2_kernel_us":26.6428,"fa2_compat_us":35.8150,"nrmse":0.000550,"max_abs_error":0.000366}
+{"q":7,"kv":128,"capacity":256,"type":"q8_0","splits":0,"ggml_us":37.1546,"fa2_kernel_us":26.7872,"fa2_compat_us":37.4096,"nrmse":0.000748,"max_abs_error":0.001021}
+{"q":128,"kv":128,"capacity":256,"type":"q8_0","splits":0,"ggml_us":357.1936,"fa2_kernel_us":52.0918,"fa2_compat_us":149.4772,"nrmse":0.000503,"max_abs_error":0.002086}
+{"q":2,"kv":1024,"capacity":1024,"type":"q8_0","splits":0,"ggml_us":158.5786,"fa2_kernel_us":142.1090,"fa2_compat_us":210.2968,"nrmse":0.000763,"max_abs_error":0.000242}
+{"q":7,"kv":1024,"capacity":1024,"type":"q8_0","splits":0,"ggml_us":178.2708,"fa2_kernel_us":142.1260,"fa2_compat_us":213.5296,"nrmse":0.001280,"max_abs_error":0.000481}
+{"q":128,"kv":1024,"capacity":1024,"type":"q8_0","splits":0,"ggml_us":757.2248,"fa2_kernel_us":352.3102,"fa2_compat_us":443.7212,"nrmse":0.001689,"max_abs_error":0.001146}

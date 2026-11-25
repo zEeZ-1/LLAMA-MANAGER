@@ -1,0 +1,118 @@
+{
+  "control": {
+    "gate-up-128": {
+      "runs_ms": [
+        7.317842286,
+        7.340326857,
+        7.269707429
+      ],
+      "identical_to_control": true,
+      "median_ms": 7.318
+    },
+    "gate-up-256": {
+      "runs_ms": [
+        14.137300572,
+        14.274123429,
+        14.192473143
+      ],
+      "identical_to_control": true,
+      "median_ms": 14.192
+    },
+    "gate-up-512": {
+      "runs_ms": [
+        29.529344,
+        29.473778286,
+        29.248704
+      ],
+      "identical_to_control": true,
+      "median_ms": 29.474
+    }
+  },
+  "async-cg": {
+    "gate-up-128": {
+      "runs_ms": [
+        7.703995428,
+        7.734827429,
+        7.833284571
+      ],
+      "identical_to_control": true,
+      "median_ms": 7.735
+    },
+    "gate-up-256": {
+      "runs_ms": [
+        13.810509714,
+        13.769229714,
+        14.002089143
+      ],
+      "identical_to_control": true,
+      "median_ms": 13.811
+    },
+    "gate-up-512": {
+      "runs_ms": [
+        28.557161143,
+        28.721449143,
+        28.576139428
+      ],
+      "identical_to_control": true,
+      "median_ms": 28.576
+    }
+  },
+  "async-ca": {
+    "gate-up-128": {
+      "runs_ms": [
+        7.629780571,
+        7.757286857,
+        7.721705143
+      ],
+      "identical_to_control": true,
+      "median_ms": 7.722
+    },
+    "gate-up-256": {
+      "runs_ms": [
+        13.791186285,
+        13.783293714,
+        13.696342857
+      ],
+      "identical_to_control": true,
+      "median_ms": 13.783
+    },
+    "gate-up-512": {
+      "runs_ms": [
+        28.275213715,
+        28.303158857,
+        28.469058285
+      ],
+      "identical_to_control": true,
+      "median_ms": 28.303
+    }
+  },
+  "l2-hint": {
+    "gate-up-128": {
+      "runs_ms": [
+        7.225741714,
+        7.208731429,
+        7.271430857
+      ],
+      "identical_to_control": true,
+      "median_ms": 7.226
+    },
+    "gate-up-256": {
+      "runs_ms": [
+        13.869622857,
+        13.845467429,
+        13.935149714
+      ],
+      "identical_to_control": true,
+      "median_ms": 13.87
+    },
+    "gate-up-512": {
+      "runs_ms": [
+        28.178203429,
+        28.118998857,
+        28.235044571
+      ],
+      "identical_to_control": true,
+      "median_ms": 28.178
+    }
+  }
+}

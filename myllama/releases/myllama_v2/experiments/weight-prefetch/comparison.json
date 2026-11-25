@@ -1,0 +1,41 @@
+{
+  "control": {
+    "n": 6,
+    "median_ttft_ms": 3317.21,
+    "median_prefill_tok_s": 231.733,
+    "ttft_ms": [
+      3351.81,
+      3329.6,
+      3313.28,
+      3321.14,
+      3306.97,
+      3311.91
+    ],
+    "throughput_change_pct": 0.0
+  },
+  "async-ca": {
+    "n": 3,
+    "median_ttft_ms": 3314.62,
+    "median_prefill_tok_s": 231.891,
+    "ttft_ms": [
+      3314.62,
+      3329.37,
+      3295.92
+    ],
+    "throughput_change_pct": 0.068
+  },
+  "l2-hint": {
+    "n": 6,
+    "median_ttft_ms": 3271.34,
+    "median_prefill_tok_s": 234.988,
+    "ttft_ms": [
+      3282.51,
+      3377.82,
+      3266.61,
+      3269.19,
+      3273.48,
+      3268.9
+    ],
+    "throughput_change_pct": 1.405
+  }
+}

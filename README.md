@@ -10,6 +10,10 @@ V3 Image 增加独立模型目录、格式 / 类型识别、多模态实例和�
 
 v3.2 重构为常驻三栏工作空间：点击中间节点进入控制详情，在右侧直接选择模型、填写参数并创建 / 删除实例，从左侧进入历史对话。创建草稿和生成任务在查看节点时保留。见 [v3.2 设计与发布记录](docs/development_v3_2.md) 和 [验证记录](docs/validation_v3_2.md)。[v3.1](docs/development_v3_1.md) 是此前的品牌与页面式界面版本。
 
+## 自主优化推理后端
+
+[`myllama/`](myllama/README.md) 保存并发布自主优化的 llama.cpp 后端，目前包含 `myllama_v1` 和 `myllama_v2` 的源码、脚本、实验记录和校验清单。原生运行包通过对应 GitHub Release 附件下载，模型权重单独提供。
+
 ## 快速开始
 
 要求 Linux、可用的 systemd 用户服务、OpenSSH 客户端（ssh/scp/ssh-keyscan/ssh-keygen）、Python 3.12+、Node.js 22.12+（仅开发 / 构建）和可用的 llama.cpp。默认入口通过 systemd 托管后端及其推理进程，以保证后端崩溃后回收模型进程。
