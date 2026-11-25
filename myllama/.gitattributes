@@ -1,2 +1,2 @@
-# Preserve immutable release bytes so SHA256SUMS also survives cross-platform clones.
-releases/** -text
+# Preserve immutable release bytes and original log/patch formatting.
+releases/** -text -whitespace
