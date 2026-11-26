@@ -1,0 +1,231 @@
+{
+  "mtp-on": {
+    "log128": {
+      "n": 3,
+      "ttft_s": 0.708031200003461,
+      "min_s": 0.7074658240017015,
+      "max_s": 0.7557444160047453,
+      "decode_tps": 13.459652177570861,
+      "server_decode_tps": 13.460152180907864,
+      "prefill_tps": 181.22200261639264,
+      "wall_s": 5.388619391997054,
+      "accepted": 114,
+      "drafted": 147,
+      "accept_rate": 0.7755102040816326
+    },
+    "log1024": {
+      "n": 3,
+      "ttft_s": 2.652946559996053,
+      "min_s": 2.6082988799971645,
+      "max_s": 2.678096319999895,
+      "decode_tps": 12.807345055808096,
+      "server_decode_tps": 12.808275365722006,
+      "prefill_tps": 386.3731036023255,
+      "wall_s": 7.572639168000023,
+      "accepted": 111,
+      "drafted": 153,
+      "accept_rate": 0.7254901960784313
+    },
+    "log4096": {
+      "n": 3,
+      "ttft_s": 9.271943327999907,
+      "min_s": 9.257821503997548,
+      "max_s": 9.29821695999999,
+      "decode_tps": 13.152169752278327,
+      "server_decode_tps": 13.152109786297006,
+      "prefill_tps": 442.03798504927386,
+      "wall_s": 14.063630176002334,
+      "accepted": 114,
+      "drafted": 144,
+      "accept_rate": 0.7916666666666666
+    },
+    "code4096": {
+      "n": 3,
+      "ttft_s": 9.591254336002748,
+      "min_s": 9.587939839999308,
+      "max_s": 9.599165311999968,
+      "decode_tps": 14.225337848807593,
+      "server_decode_tps": 14.225592608833686,
+      "prefill_tps": 427.27811945886725,
+      "wall_s": 14.029151839997212,
+      "accepted": 120,
+      "drafted": 135,
+      "accept_rate": 0.8888888888888888
+    },
+    "first-raw-code4096": {
+      "n": 1,
+      "ttft_s": 9.858462495998538,
+      "min_s": 9.858462495998538,
+      "max_s": 9.858462495998538,
+      "decode_tps": 13.173907340570373,
+      "server_decode_tps": 13.163189704129106,
+      "prefill_tps": 417.01668341622593,
+      "wall_s": 14.662215680000372,
+      "accepted": 40,
+      "drafted": 45,
+      "accept_rate": 0.8888888888888888
+    },
+    "code4096-long-output": {
+      "n": 1,
+      "ttft_s": 9.572487360004743,
+      "min_s": 9.572487360004743,
+      "max_s": 9.572487360004743,
+      "decode_tps": 15.044255090545898,
+      "server_decode_tps": 15.044862120354157,
+      "prefill_tps": 428.1268020443473,
+      "wall_s": 18.015181792005023,
+      "accepted": 83,
+      "drafted": 88,
+      "accept_rate": 0.9431818181818182
+    }
+  },
+  "mtp-off": {
+    "log128": {
+      "n": 3,
+      "ttft_s": 0.6416596479975851,
+      "min_s": 0.6377427200059174,
+      "max_s": 0.6766791039990494,
+      "decode_tps": 10.891123599012513,
+      "server_decode_tps": 10.89170378922375,
+      "prefill_tps": 200.15449425024943,
+      "wall_s": 6.448413856000116,
+      "accepted": 0,
+      "drafted": 0,
+      "accept_rate": null
+    },
+    "log1024": {
+      "n": 3,
+      "ttft_s": 2.3459926080031437,
+      "min_s": 2.3196778559940867,
+      "max_s": 2.355823199999577,
+      "decode_tps": 10.723591340462974,
+      "server_decode_tps": 10.723546627512672,
+      "prefill_tps": 437.05379645670587,
+      "wall_s": 8.22937968000042,
+      "accepted": 0,
+      "drafted": 0,
+      "accept_rate": null
+    },
+    "log4096": {
+      "n": 3,
+      "ttft_s": 5.054551296001591,
+      "min_s": 4.971350560001156,
+      "max_s": 5.353272191998258,
+      "decode_tps": 10.430513034753723,
+      "server_decode_tps": 10.42713863095973,
+      "prefill_tps": 811.3984043422493,
+      "wall_s": 11.11162169599993,
+      "accepted": 0,
+      "drafted": 0,
+      "accept_rate": null
+    },
+    "code4096": {
+      "n": 3,
+      "ttft_s": 5.260792863999086,
+      "min_s": 5.230698271996516,
+      "max_s": 5.278167775999464,
+      "decode_tps": 10.381027391256483,
+      "server_decode_tps": 10.381004278127207,
+      "prefill_tps": 779.4828542317584,
+      "wall_s": 11.348197407998668,
+      "accepted": 0,
+      "drafted": 0,
+      "accept_rate": null
+    },
+    "first-raw-code4096": {
+      "n": 1,
+      "ttft_s": 5.291893920002622,
+      "min_s": 5.291893920002622,
+      "max_s": 5.291893920002622,
+      "decode_tps": 10.232865666119293,
+      "server_decode_tps": 10.219220114539613,
+      "prefill_tps": 780.023922511022,
+      "wall_s": 11.46853612799896,
+      "accepted": 0,
+      "drafted": 0,
+      "accept_rate": null
+    },
+    "code4096-long-output": {
+      "n": 1,
+      "ttft_s": 5.214770848004264,
+      "min_s": 5.214770848004264,
+      "max_s": 5.214770848004264,
+      "decode_tps": 10.409426978508154,
+      "server_decode_tps": 10.409592890657882,
+      "prefill_tps": 786.2542184861496,
+      "wall_s": 17.41650835200562,
+      "accepted": 0,
+      "drafted": 0,
+      "accept_rate": null
+    }
+  },
+  "greedy_comparison": {
+    "matched": 5,
+    "pairs": 14,
+    "differences": [
+      {
+        "case": "log128",
+        "trial": 1,
+        "first_diff_index": 13,
+        "mtp_token": 271,
+        "off_token": 198
+      },
+      {
+        "case": "log1024",
+        "trial": 1,
+        "first_diff_index": 38,
+        "mtp_token": 13,
+        "off_token": 3376
+      },
+      {
+        "case": "log4096",
+        "trial": 1,
+        "first_diff_index": 0,
+        "mtp_token": 2639,
+        "off_token": 271
+      },
+      {
+        "case": "log4096",
+        "trial": 2,
+        "first_diff_index": 0,
+        "mtp_token": 2639,
+        "off_token": 271
+      },
+      {
+        "case": "log1024",
+        "trial": 2,
+        "first_diff_index": 38,
+        "mtp_token": 13,
+        "off_token": 3376
+      },
+      {
+        "case": "log128",
+        "trial": 2,
+        "first_diff_index": 13,
+        "mtp_token": 271,
+        "off_token": 198
+      },
+      {
+        "case": "log128",
+        "trial": 3,
+        "first_diff_index": 13,
+        "mtp_token": 271,
+        "off_token": 198
+      },
+      {
+        "case": "log1024",
+        "trial": 3,
+        "first_diff_index": 38,
+        "mtp_token": 13,
+        "off_token": 3376
+      },
+      {
+        "case": "log4096",
+        "trial": 3,
+        "first_diff_index": 0,
+        "mtp_token": 2639,
+        "off_token": 271
+      }
+    ]
+  }
+}

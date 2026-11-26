@@ -6,7 +6,8 @@
 /releases/**/*.tar.gz
 /releases/**/*.tar
 /releases/**/*.zip
-/releases/**/models/
+/releases/**/models/*
+!/releases/**/models/SHA256SUMS
 /releases/**/*.gguf
 /releases/**/probe
 /releases/**/probe-causal

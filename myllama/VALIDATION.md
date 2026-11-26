@@ -19,3 +19,14 @@ python3 myllama/package_release.py myllama/releases/myllama_v1 --verify-only
 python3 myllama/package_release.py myllama/releases/myllama_v2 --verify-only
 .venv/bin/python -m pytest -q myllama/test_packaging.py
 ```
+
+
+## myllama_v3 更新（2026-11-26）
+
+- 从同一来源导入 v3，排除运行过程中产生的 `__pycache__`；源码、说明、脚本、模型校验文件及历史基准记录保持原字节，动态库链接保持原目标。
+- v3 原运行包及其 SHA256 原样保留。37 项运行时校验通过；60 个归档条目的路径、内容、权限及链接与本机导入目录一致，归档不含 GGUF 权重。所有启动 shell 脚本通过 `bash -n`。
+- 索引 latest 更新为 `myllama_v3`。兼容 v3 manifest 的 `release` 字段，允许 `models/SHA256SUMS` 元数据进入 Git 和运行包，并验证它自身的 SHA256；模型权重继续排除。
+- 打包测试扩展到 7 项并通过，覆盖旧 / 新 manifest、模型校验元数据保留与篡改识别，以及此前的无权重归档、链接 / 权限和覆盖保护。新工具代码通过 Ruff 检查。
+- 本次没有重跑历史模型性能测试，也没有更改 AscNet 运行时选择或启动主控 / RPC 服务。
+
+复核：`python3 myllama/package_release.py myllama/releases/myllama_v3 --verify-only`。

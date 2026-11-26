@@ -12,7 +12,7 @@ v3.2 重构为常驻三栏工作空间：点击中间节点进入控制详情，
 
 ## 自主优化推理后端
 
-[`myllama/`](myllama/README.md) 保存并发布自主优化的 llama.cpp 后端，目前包含 `myllama_v1` 和 `myllama_v2` 的源码、脚本、实验记录和校验清单。原生运行包通过对应 GitHub Release 附件下载，模型权重单独提供。
+[`myllama/`](myllama/README.md) 保存并发布自主优化的 llama.cpp 后端，目前包含 `myllama_v1`、`myllama_v2` 和 `myllama_v3` 的源码、脚本、实验记录和校验清单。原生运行包通过对应 GitHub Release 附件下载，模型权重单独提供。
 
 ## 快速开始
 

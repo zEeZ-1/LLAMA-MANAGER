@@ -18,7 +18,7 @@ def verify(release: Path) -> tuple[int, int]:
         relative = Path(name.lstrip("*"))
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError(f"Unsafe checksum path: {name}")
-        if "models" in relative.parts:
+        if "models" in relative.parts and relative.name != "SHA256SUMS":
             skipped += 1
             continue
         path = release / relative
@@ -46,8 +46,12 @@ def package(release: Path, output: Path) -> Path:
 
     def include(info: tarfile.TarInfo):
         parts = Path(info.name).parts
-        if "models" in parts[1:] or info.name.lower().endswith(".gguf"):
+        if info.name.lower().endswith(".gguf"):
             return None
+        if "models" in parts[1:]:
+            after_models = parts[parts.index("models", 1) + 1 :]
+            if after_models and after_models != ("SHA256SUMS",):
+                return None
         if info.issym():
             target = release.parent / info.name
             if not target.resolve().is_relative_to(release):
@@ -91,8 +95,8 @@ def main():
     if not re.fullmatch(r"myllama_v[0-9]+(?:[._-][A-Za-z0-9]+)*", release.name):
         parser.error("Release directory must be named myllama_v<version>")
     manifest = json.loads((release / "manifest.json").read_text())
-    if manifest.get("name") != release.name:
-        parser.error("manifest.json name must match release directory")
+    if (manifest.get("name") or manifest.get("release")) != release.name:
+        parser.error("manifest.json name/release must match release directory")
     checked, skipped = verify(release)
     print(f"Verified {checked} runtime files; skipped {skipped} model checksum entries")
     if not args.verify_only:

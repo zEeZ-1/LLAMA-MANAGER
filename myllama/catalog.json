@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "latest": "myllama_v2",
+  "latest": "myllama_v3",
   "releases": [
     {
       "name": "myllama_v1",
@@ -41,6 +41,27 @@
         "sha256": "bd8e0a696ec84ddfde8149c510bc42a054eb218a670dae520d99ddbad0408cb4",
         "url": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/download/myllama_v2/myllama_v2-runtime.tar.gz",
         "checksum_url": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/download/myllama_v2/myllama_v2-runtime.tar.gz.sha256",
+        "includes_model_weights": false
+      }
+    },
+    {
+      "name": "myllama_v3",
+      "date": "2026-11-26",
+      "llama_cpp_commit": "9214bdb554544c35e4a9e2c2e8b75d8cfee330ab",
+      "platform": {
+        "arch": "aarch64",
+        "sm": 87,
+        "cuda": "13.2",
+        "description": "Linux aarch64 / NVIDIA Jetson Orin Nano SM87 / CUDA 13.2"
+      },
+      "directory": "releases/myllama_v3",
+      "github_release": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/tag/myllama_v3",
+      "runtime": {
+        "filename": "myllama_v3-runtime.tar.gz",
+        "size_bytes": 57761465,
+        "sha256": "ed3d9add74bc466a93a2d47ef3f44aca66ffe501d5316cbfff55f5710bf44f60",
+        "url": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/download/myllama_v3/myllama_v3-runtime.tar.gz",
+        "checksum_url": "https://github.com/zEeZ-1/LLAMA-MANAGER/releases/download/myllama_v3/myllama_v3-runtime.tar.gz.sha256",
         "includes_model_weights": false
       }
     }

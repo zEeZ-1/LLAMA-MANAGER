@@ -1,0 +1,54 @@
+{
+  "release": "myllama_v3",
+  "platform": "Linux aarch64 / NVIDIA Jetson Orin Nano SM87 / CUDA 13.2",
+  "source_base": "9214bdb554544c35e4a9e2c2e8b75d8cfee330ab",
+  "model_bundled": false,
+  "default": {
+    "spec_type": "none",
+    "ctx": 5120,
+    "batch": 4096,
+    "ubatch": 832,
+    "main_layers": [
+      12,
+      14,
+      14
+    ],
+    "model_order": [
+      ".12",
+      ".13",
+      ".11"
+    ],
+    "kv": "q8_0",
+    "rpc_buffer_max_mib": 512,
+    "window": 5
+  },
+  "symlinks": {
+    "bin/libggml-base.so": "libggml-base.so.1",
+    "bin/libggml-base.so.1": "libggml-base.so.1.0.0",
+    "bin/libggml-cpu.so": "libggml-cpu.so.1",
+    "bin/libggml-cpu.so.1": "libggml-cpu.so.1.0.0",
+    "bin/libggml-cuda.so": "libggml-cuda.so.1",
+    "bin/libggml-cuda.so.1": "libggml-cuda.so.1.0.0",
+    "bin/libggml-rpc.so": "libggml-rpc.so.1",
+    "bin/libggml-rpc.so.1": "libggml-rpc.so.1.0.0",
+    "bin/libggml.so": "libggml.so.1",
+    "bin/libggml.so.1": "libggml.so.1.0.0",
+    "bin/libllama-common.so": "libllama-common.so.1",
+    "bin/libllama-common.so.1": "libllama-common.so.1.0.0",
+    "bin/libllama.so": "libllama.so.1",
+    "bin/libllama.so.1": "libllama.so.1.0.0",
+    "bin/libmtmd.so": "libmtmd.so.1",
+    "bin/libmtmd.so.1": "libmtmd.so.1.0.0"
+  },
+  "mtp_on": {
+    "spec_type": "draft-mtp",
+    "main_layers": [
+      14,
+      15,
+      11
+    ],
+    "mtp_node": ".11",
+    "draft_max": 2,
+    "draft_ubatch": 256
+  }
+}

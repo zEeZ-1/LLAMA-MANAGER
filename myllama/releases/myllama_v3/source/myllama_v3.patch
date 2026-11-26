@@ -1,0 +1,1497 @@
+diff --git a/common/arg.cpp b/common/arg.cpp
+index 5dc7c8d..e57c9cf 100644
+--- a/common/arg.cpp
++++ b/common/arg.cpp
+@@ -1658,6 +1658,26 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+             params.n_ubatch = value;
+         }
+     ).set_env("LLAMA_ARG_UBATCH"));
++    add_opt(common_arg(
++        {"--rpc-prefill-schedule"}, "legacy|pipeline",
++        "scheduling mode for single-sequence distributed prefill (default: legacy)",
++        [](common_params & params, const std::string & value) {
++            if (value != "legacy" && value != "pipeline") {
++                throw std::invalid_argument("expected legacy or pipeline");
++            }
++            params.rpc_prefill_pipeline = value == "pipeline";
++        }
++    ).set_env("LLAMA_ARG_RPC_PREFILL_SCHEDULE"));
++    add_opt(common_arg(
++        {"--rpc-prefill-window"}, "N",
++        "maximum in-flight prefill microbatches, 2 through 8 (default: 2)",
++        [](common_params & params, int value) {
++            if (value < 2 || value > 8) {
++                throw std::invalid_argument("expected a window between 2 and 8");
++            }
++            params.rpc_prefill_window = value;
++        }
++    ).set_env("LLAMA_ARG_RPC_PREFILL_WINDOW"));
+     add_opt(common_arg(
+         {"--keep"}, "N",
+         string_format("number of tokens to keep from the initial prompt (default: %d, -1 = all)", params.n_keep),
+diff --git a/common/common.cpp b/common/common.cpp
+index 657dcdb..94b19f7 100644
+--- a/common/common.cpp
++++ b/common/common.cpp
+@@ -1389,6 +1389,9 @@ common_init_result::common_init_result(common_params & params, bool model_only)
+         return;
+     }
+ 
++    if (params.rpc_prefill_pipeline) {
++        llama_set_rpc_prefill_window(lctx, params.rpc_prefill_window);
++    }
+     pimpl->context.reset(lctx);
+ 
+     set_process_priority(params.cpuparams.priority);
+@@ -1533,11 +1536,62 @@ common_init_result_ptr common_init_from_params(common_params & params, bool mode
+             tmp.push_back(decoder_start_token_id);
+         }
+         if (llama_model_has_decoder(model)) {
+-            tmp.resize(std::min(tmp.size(), (size_t) params.n_batch));
++            const bool rpc_warmup = params.rpc_prefill_pipeline && params.n_parallel == 1 && llama_vocab_n_tokens(vocab) > 0 &&
++                !llama_model_has_encoder(model) &&
++                std::any_of(params.devices.begin(), params.devices.end(), [](ggml_backend_dev_t dev) {
++                    return dev && strncmp(ggml_backend_dev_name(dev), "RPC", 3) == 0;
++                });
++            if (rpc_warmup) {
++                // Exercise the same graph shapes and streams before service readiness.
++                // All prompt and recurrent state is cleared below, including on failure.
++                size_t n = std::min<size_t>({4096, llama_n_ctx_seq(lctx), llama_n_batch(lctx),
++                                             size_t(llama_n_ubatch(lctx))*params.rpc_prefill_window});
++                tmp.resize(n);
++                const uint32_t vocab_size = llama_vocab_n_tokens(vocab);
++                uint32_t state = 42;
++                for (auto & token : tmp) {
++                    state = 1664525u * state + 1013904223u;
++                    token = state % vocab_size;
++                }
++                COM_INF("%s: warming distributed prefill with %zu synthetic tokens\n", __func__, n);
++            } else {
++                tmp.resize(std::min(tmp.size(), (size_t) params.n_batch));
++            }
+             common_batch batch = common_batch_get_one(lctx, tmp);
+             std::vector<float> zeros;
+             common_batch_set_zero_state(batch, model, zeros);
+-            llama_process(lctx, LLAMA_PROCESS_TYPE_DECODE, batch.get());
++            if (llama_process(lctx, LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
++                COM_WRN("%s: decoder warmup did not complete\n", __func__);
++            }
++            if (rpc_warmup) {
++                llama_synchronize(lctx);
++                llama_memory_clear(llama_get_memory(lctx), true);
++
++                // Exercise text lookup after the large device allocations. The
++                // sample comes from the model vocabulary, independent of requests.
++                std::string text;
++                const uint32_t vocab_size = llama_vocab_n_tokens(vocab);
++                uint32_t seed = 71;
++                for (size_t i = 0; i < 8192 && text.size() < 65536; ++i) {
++                    seed = 1664525u * seed + 1013904223u;
++                    auto word = llama_vocab_get_text(vocab, seed % vocab_size);
++                    size_t len = strlen(word);
++                    if (len <= 96) {
++                        text.append(word, len);
++                        text.push_back(' ');
++                    }
++                }
++                auto tokens = common_tokenize(vocab, text, false, true);
++                if (tokens.size() >= tmp.size()) {
++                    tokens.resize(tmp.size());
++                    common_batch second = common_batch_get_one(lctx, tokens);
++                    common_batch_set_zero_state(second, model, zeros);
++                    if (llama_process(lctx, LLAMA_PROCESS_TYPE_DECODE, second.get()) != 0) {
++                        COM_WRN("%s: distributed text warmup did not complete\n", __func__);
++                    }
++                    llama_synchronize(lctx);
++                }
++            }
+         }
+         llama_memory_clear(llama_get_memory(lctx), true);
+         llama_synchronize(lctx);
+diff --git a/common/common.h b/common/common.h
+index 9b9e892..ec1defc 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -477,6 +477,8 @@ struct common_params {
+     int32_t n_predict             =    -1; // max. number of new tokens to predict, -1 == no limit
+     int32_t n_ctx                 =     0; // context size, 0 == context the model was trained with
+     int32_t n_batch               =  2048; // logical batch size for prompt processing (must be >=32 to use BLAS)
++    bool rpc_prefill_pipeline     = false;
++    int32_t rpc_prefill_window    = 2;
+     int32_t n_ubatch              =   512; // physical batch size for prompt processing (must be >=32 to use BLAS)
+     int32_t n_keep                =     0; // number of tokens to keep from initial prompt
+     int32_t n_chunks              =    -1; // max number of chunks to process (-1 = unlimited)
+diff --git a/ggml/include/ggml-backend.h b/ggml/include/ggml-backend.h
+index afb8633..e6dd46c 100644
+--- a/ggml/include/ggml-backend.h
++++ b/ggml/include/ggml-backend.h
+@@ -361,6 +361,10 @@ extern "C" {
+     GGML_API ggml_backend_t       ggml_backend_sched_get_backend(ggml_backend_sched_t sched, int i);
+ 
+     // Get the number of splits of the last graph
++    // Run preallocated graphs in token order. Earlier blocks must have no caller-visible GPU outputs.
++    // Model state shared by these graphs must be updated in order on the same backend.
++    GGML_API enum ggml_status ggml_backend_sched_graph_compute_window(ggml_backend_sched_t * schedulers, size_t count);
++
+     GGML_API int                  ggml_backend_sched_get_n_splits(ggml_backend_sched_t sched);
+     GGML_API int                  ggml_backend_sched_get_n_copies(ggml_backend_sched_t sched);
+ 
+diff --git a/ggml/src/ggml-alloc.c b/ggml/src/ggml-alloc.c
+index 65d2bea..3707727 100644
+--- a/ggml/src/ggml-alloc.c
++++ b/ggml/src/ggml-alloc.c
+@@ -1,4 +1,5 @@
+ #include "ggml-alloc.h"
++#include "ggml-pipeline-scratch.h"
+ #include "ggml-backend-impl.h"
+ #include "ggml.h"
+ #include "ggml-impl.h"
+@@ -393,11 +394,12 @@ static size_t ggml_dyn_tallocr_max_size(struct ggml_dyn_tallocr * alloc, int chu
+ // virtual buffer with contiguous memory range, split into multiple backend buffers (chunks)
+ 
+ struct vbuffer {
++    unsigned owners; // modified only by the scheduler owner thread
+     ggml_backend_buffer_t chunks[GGML_VBUFFER_MAX_CHUNKS];
+ };
+ 
+ static void ggml_vbuffer_free(struct vbuffer * buf) {
+-    if (buf == NULL) {
++    if (buf == NULL || --buf->owners != 0) {
+         return;
+     }
+     for (int i = 0; i < GGML_VBUFFER_MAX_CHUNKS; ++i) {
+@@ -424,6 +426,7 @@ static struct vbuffer * ggml_vbuffer_alloc(ggml_backend_buffer_type_t buft, cons
+         return NULL;
+     }
+ 
++    buf->owners = 1;
+     for (int n = 0; n < talloc->n_chunks; n++) {
+         size_t chunk_size = talloc->chunks[n]->max_size;
+         buf->chunks[n] = ggml_backend_buft_alloc_buffer(buft, chunk_size);
+@@ -1094,6 +1097,15 @@ bool ggml_gallocr_alloc_graph(ggml_gallocr_t galloc, struct ggml_cgraph * graph)
+     return true;
+ }
+ 
++void ggml_gallocr_share_buffer(ggml_gallocr_t dst, ggml_gallocr_t src, int i) {
++    GGML_ASSERT(i >= 0 && i < dst->n_buffers && i < src->n_buffers);
++    GGML_ASSERT(dst->bufts[i] == src->bufts[i] && dst->buffers[i] == NULL);
++    if (src->buffers[i]) {
++        dst->buffers[i] = src->buffers[i];
++        ++dst->buffers[i]->owners;
++    }
++}
++
+ size_t ggml_gallocr_get_buffer_size(ggml_gallocr_t galloc, int buffer_id) {
+     GGML_ASSERT(buffer_id >= 0 && buffer_id < galloc->n_buffers);
+ 
+diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
+index 2e2f9c0..8793b44 100644
+--- a/ggml/src/ggml-backend.cpp
++++ b/ggml/src/ggml-backend.cpp
+@@ -11,6 +11,14 @@
+ #include "ggml-backend.h"
+ #include "ggml-backend-impl.h"
+ #include "ggml-alloc.h"
++#include "ggml-pipeline-scratch.h"
++#include <condition_variable>
++#include <mutex>
++#include "ggml-pipeline.h"
++
++#include <chrono>
++#include <cinttypes>
++#include <future>
+ #include "ggml-impl.h"
+ 
+ #include <assert.h>
+@@ -2210,17 +2218,44 @@ static void ggml_backend_sched_prefetch_inputs(ggml_backend_sched_t sched, int s
+     }
+ }
+ 
+-static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t sched) {
++// A linear window has one CPU prefix and separate arenas. Its host inputs remain
++// valid through the destination stream fence (RPC SET also owns a message copy).
++static bool ggml_pipeline_upload_host_input(ggml_backend_sched_t sched, ggml_backend_sched_split * split, ggml_tensor * input) {
++    auto host = ggml_backend_sched_get_tensor_backend(sched, input);
++    auto dst = sched->backends[split->backend_id];
++    if (!host || host == dst || ggml_backend_dev_type(ggml_backend_get_device(host)) != GGML_BACKEND_DEVICE_TYPE_CPU ||
++        !dst->iface.set_tensor_async ||
++        !ggml_is_contiguous(input)) {
++        return false;
++    }
++    auto * buf = input->view_src ? input->view_src->buffer : input->buffer;
++    auto * copy = tensor_copy(input, split->backend_id, sched->cur_copy);
++    if (!buf || !ggml_backend_buffer_is_host(buf) || !copy->buffer ||
++        ggml_backend_buffer_get_type(copy->buffer) != ggml_backend_get_default_buffer_type(dst) ||
++        !ggml_is_contiguous(copy) || ggml_nbytes(copy) != ggml_nbytes(input)) {
++        return false;
++    }
++    if (getenv("GGML_PIPELINE_UPLOAD_TRACE") && ggml_nbytes(input) >= 65536) {
++        GGML_LOG_INFO("pipeline upload: %s -> %s %zu bytes\n", input->name, ggml_backend_name(dst), ggml_nbytes(input));
++    }
++    ggml_backend_synchronize(host);
++    ggml_backend_tensor_set_async(dst, copy, input->data, 0, ggml_nbytes(input));
++    return true;
++}
++
++static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t sched, int first, int end,
++        const std::vector<ggml_tensor *> * staged = nullptr) {
+     GGML_ASSERT(sched);
+     struct ggml_backend_sched_split * splits = sched->splits;
++    int prev_backend_id = first ? splits[first - 1].backend_id : -1;
++    static const bool trace_times = getenv("GGML_PIPELINE_TRACE") != nullptr;
+ 
+-    int prev_backend_id = -1;
+-
+-    for (int split_id = 0; split_id < sched->n_splits; split_id++) {
++    for (int split_id = first; split_id < end; split_id++) {
+         struct ggml_backend_sched_split * split = &splits[split_id];
+         int split_backend_id = split->backend_id;
+         ggml_backend_t split_backend = sched->backends[split_backend_id];
+ 
++        const int64_t start_us = trace_times ? ggml_time_us() : 0;
+         // ensure the previous split's async work has completed before we start
+         // this split, the allocator may have reused buffer regions across splits
+         if (split->n_inputs == 0 && prev_backend_id >= 0 && prev_backend_id != split_backend_id) {
+@@ -2235,7 +2270,9 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+         // the weights in host memory are copied last, so that the copy callback can read the other inputs of the split
+         for (int input_id = 0; input_id < split->n_inputs; input_id++) {
+             struct ggml_tensor * input = split->inputs[input_id];
+-            if (!ggml_backend_sched_is_host_weight(input) && sched->hv_tensor_requires_copy[hash_id(input)]) {
++            if (!ggml_backend_sched_is_host_weight(input) && sched->hv_tensor_requires_copy[hash_id(input)] &&
++                (!staged || (std::find(staged->begin(), staged->end(), input) == staged->end() &&
++                             !ggml_pipeline_upload_host_input(sched, split, input)))) {
+                 ggml_backend_sched_copy_input(sched, split, input);
+             }
+         }
+@@ -2249,6 +2286,7 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+             }
+         }
+ 
++        const int64_t ready_us = trace_times ? ggml_time_us() : 0;
+         if (!sched->callback_eval) {
+             enum ggml_status ec = ggml_backend_graph_compute_async(split_backend, &split->graph);
+             if (ec != GGML_STATUS_SUCCESS) {
+@@ -2293,12 +2331,311 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+             ggml_backend_event_record(sched->events[split_backend_id][sched->cur_copy], split_backend);
+         }
+ 
++        if (trace_times) {
++            GGML_LOG_INFO("ggml split: uid=%" PRIu64 " split=%d backend=%s copy=%d inputs=%d start_us=%" PRId64
++                          " ready_us=%" PRId64 " submitted_us=%" PRId64 "\n",
++                          split->graph.uid, split_id, ggml_backend_name(split_backend), sched->cur_copy, split->n_inputs,
++                          start_us, ready_us, ggml_time_us());
++        }
+         prev_backend_id = split_backend_id;
+     }
+ 
+     return GGML_STATUS_SUCCESS;
+ }
+ 
++// A device processes blocks in order. CPU graph inputs and in-transit activations
++// are private to each block, so accelerator scratch can be reused after its boundary read.
++void ggml_backend_sched_share_pipeline_scratch(ggml_backend_sched_t dst, ggml_backend_sched_t src) {
++    GGML_ASSERT(!dst->is_alloc && dst->n_backends == src->n_backends);
++    for (int i = 0; i < src->n_backends; ++i) {
++        GGML_ASSERT(dst->backends[i] == src->backends[i]);
++        if (!ggml_backend_buft_is_host(src->bufts[i]) &&
++            std::find(src->bufts, src->bufts + i, src->bufts[i]) == src->bufts + i) {
++            ggml_gallocr_share_buffer(dst->galloc, src->galloc, i);
++        }
++    }
++}
++bool ggml_backend_sched_pipeline_inputs_on_host(const ggml_cgraph * graph) {
++    for (int i = 0; i < graph->n_leafs; ++i) {
++        auto * input = graph->leafs[i];
++        if (input->flags & GGML_TENSOR_FLAG_INPUT) {
++            auto buf = input->view_src ? input->view_src->buffer : input->buffer;
++            if (!buf || !ggml_backend_buffer_is_host(buf)) { return false; }
++        }
++    }
++    return true;
++}
++
++struct ggml_pipeline_copy {
++    ggml_tensor * src;
++    ggml_tensor * dst;
++    ggml_backend_buffer_t host;
++};
++
++struct ggml_pipeline_wakeup {
++    std::mutex mutex;
++    std::condition_variable changed;
++    size_t generation = 0;
++};
++
++struct ggml_pipeline_boundary {
++    bool ready = false;
++    std::vector<ggml_pipeline_copy> copies;
++    std::future<void> completed;
++
++    ~ggml_pipeline_boundary() {
++        if (completed.valid()) {
++            completed.wait();
++        }
++        for (auto & copy : copies) {
++            ggml_backend_buffer_free(copy.host);
++        }
++    }
++};
++
++static bool ggml_pipeline_prepare_boundary(ggml_backend_sched_t sched, int rank, ggml_pipeline_boundary & edge) {
++    auto & from = sched->splits[rank];
++    auto & to   = sched->splits[rank + 1];
++    auto src_backend = sched->backends[from.backend_id];
++    auto dst_backend = sched->backends[to.backend_id];
++    const char * src = ggml_backend_name(src_backend);
++    const char * dst = ggml_backend_name(dst_backend);
++    ggml_backend_t cuda = nullptr;
++    if (strncmp(src, "RPC", 3) == 0 && strncmp(dst, "CUDA", 4) == 0) {
++        cuda = dst_backend;
++    } else if (strncmp(src, "CUDA", 4) == 0 && strncmp(dst, "RPC", 3) == 0) {
++        cuda = src_backend;
++    }
++    if (!cuda) {
++        return false;
++    }
++    auto host_type = ggml_backend_dev_host_buffer_type(ggml_backend_get_device(cuda));
++    if (!host_type) {
++        return false;
++    }
++    // Bound the extra staging storage per block and edge; other inputs use the normal copy path.
++    size_t remaining = 16 * 1024 * 1024;
++    edge.copies.reserve(to.n_inputs);
++    for (int i = 0; i < to.n_inputs; ++i) {
++        auto * input = to.inputs[i];
++        if (!sched->hv_tensor_requires_copy[hash_id(input)] || (input->flags & GGML_TENSOR_FLAG_INPUT) ||
++            !ggml_is_contiguous(input) || tensor_backend_id(input) != from.backend_id ||
++            std::find(from.graph.nodes, from.graph.nodes + from.graph.n_nodes, input) == from.graph.nodes + from.graph.n_nodes) {
++            continue;
++        }
++        const size_t bytes = ggml_nbytes(input);
++        auto * dest = tensor_copy(input, to.backend_id, sched->cur_copy);
++        auto src_buf = input->view_src ? input->view_src->buffer : input->buffer;
++        auto dst_buf = dest->view_src ? dest->view_src->buffer : dest->buffer;
++        if (!bytes || bytes > remaining || !ggml_is_contiguous(dest) || ggml_nbytes(dest) != bytes ||
++            !src_buf || !dst_buf || ggml_backend_buffer_get_type(src_buf) != ggml_backend_get_default_buffer_type(src_backend) ||
++            ggml_backend_buffer_get_type(dst_buf) != ggml_backend_get_default_buffer_type(dst_backend)) {
++            continue;
++        }
++        auto host = ggml_backend_buft_alloc_buffer(host_type, bytes);
++        if (!host) {
++            continue;
++        }
++        edge.copies.push_back({input, dest, host});
++        remaining -= bytes;
++    }
++    return !edge.copies.empty();
++}
++
++static bool ggml_pipeline_stage_read(ggml_backend_t src_backend, ggml_pipeline_boundary & edge, ggml_pipeline_wakeup & wakeup) {
++    if (edge.copies.empty()) {
++        return false;
++    }
++    for (const auto & copy : edge.copies) {
++        ggml_backend_tensor_get_async(src_backend, copy.src, ggml_backend_buffer_get_base(copy.host), 0, ggml_nbytes(copy.src));
++    }
++    // In the RPC case the marker follows the GET reply, not just the producer's graph submission.
++    auto ev = ggml_backend_event_new(ggml_backend_get_device(src_backend));
++    if (!ev) {
++        ggml_backend_synchronize(src_backend);
++        return false;
++    }
++    ggml_backend_event_record(ev, src_backend);
++    auto wait_read = [ev, &edge, &wakeup]() {
++        ggml_backend_event_synchronize(ev);
++        ggml_backend_event_free(ev);
++        {
++            std::lock_guard<std::mutex> lock(wakeup.mutex);
++            edge.ready = true;
++            ++wakeup.generation;
++        }
++        wakeup.changed.notify_one();
++    };
++    try {
++        edge.completed = std::async(std::launch::async, wait_read);
++    } catch (const std::bad_alloc &) {
++        wait_read();
++        return false;
++    } catch (const std::system_error &) {
++        wait_read();
++        return false;
++    }
++    return true;
++}
++
++enum ggml_status ggml_backend_sched_graph_compute_window(ggml_backend_sched_t * plans, size_t count) try {
++    if (!plans || !count || count > 8) {
++        return GGML_STATUS_FAILED;
++    }
++    for (size_t b = 0; b < count; ++b) {
++        if (!plans[b] || !plans[b]->is_alloc ||
++            std::find(plans, plans + b, plans[b]) != plans + b) {
++            return GGML_STATUS_FAILED;
++        }
++    }
++    const int ranks = plans[0]->n_splits;
++    bool linear = ranks > 1 && count > 1 && !getenv("GGML_PIPELINE_SERIAL");
++    std::vector<ggml_backend_t> devices;
++    for (int r = 0; r < ranks; ++r) {
++        auto backend = plans[0]->backends[plans[0]->splits[r].backend_id];
++        linear &= std::find(devices.begin(), devices.end(), backend) == devices.end();
++        devices.push_back(backend);
++    }
++    for (size_t b = 0; b < count && linear; ++b) {
++        auto sched = plans[b];
++        linear = sched->n_splits == ranks && !sched->callback_eval;
++        for (int r = 0; r < ranks && linear; ++r) {
++            linear = devices[r] == sched->backends[sched->splits[r].backend_id];
++        }
++    }
++    ggml_pipeline_wakeup wakeup;
++    std::vector<ggml_pipeline_boundary> edges(count * ranks);
++    // A value computed in shared accelerator scratch must be captured before that
++    // rank starts another block. Unusual topologies use the ordered serial path.
++    for (size_t b = 0; b < count && linear; ++b) {
++        auto sched = plans[b];
++        for (int r = 1; r < ranks && linear; ++r) {
++            auto & edge = edges[b * ranks + r - 1];
++            ggml_pipeline_prepare_boundary(sched, r - 1, edge);
++            auto & split = sched->splits[r];
++            for (int i = 0; i < split.n_inputs; ++i) {
++                auto * input = split.inputs[i];
++                auto * buf = input->view_src ? input->view_src->buffer : input->buffer;
++                if (buf && !ggml_backend_buffer_is_host(buf) &&
++                    ggml_backend_buffer_get_usage(buf) == GGML_BACKEND_BUFFER_USAGE_COMPUTE &&
++                    std::none_of(edge.copies.begin(), edge.copies.end(), [input](const ggml_pipeline_copy & c) { return c.src == input; })) {
++                    linear = false;
++                    break;
++                }
++            }
++        }
++    }
++    const bool trace = getenv("GGML_PIPELINE_TRACE") != nullptr;
++    if (trace) {
++        GGML_LOG_INFO("pipeline window: blocks=%zu splits=%d linear=%d\n", count, ranks, (int) linear);
++    }
++    if (!linear) {
++        for (size_t b = 0; b < count; ++b) {
++            auto status = ggml_backend_sched_compute_splits(plans[b], 0, plans[b]->n_splits);
++            ggml_backend_sched_synchronize(plans[b]);
++            if (status != GGML_STATUS_SUCCESS) {
++                return status;
++            }
++        }
++        return GGML_STATUS_SUCCESS;
++    }
++
++    // This guard is destroyed before edges, including on allocation failure.
++    struct stream_fence {
++        const std::vector<ggml_backend_t> & backends;
++        ~stream_fence() {
++            for (auto backend : backends) {
++                ggml_backend_synchronize(backend);
++            }
++        }
++    } fence{devices};
++    ggml_pipeline_queue queue(ranks, count, count);
++    for (size_t b = 0; b < count; ++b) {
++        queue.try_admit(b + 1, 1);
++    }
++    std::vector<ggml_pipeline_queue::task> waiting;
++    std::vector<ggml_pipeline_queue::output_row> outputs;
++    ggml_status status = GGML_STATUS_SUCCESS;
++    while (!queue.drained() && status == GGML_STATUS_SUCCESS) {
++        // Drain a ready downstream input before preparing another block on the producer.
++        // A synchronous auxiliary upload behind an outstanding RPC GET stalls the controller.
++        size_t observed;
++        {
++            std::lock_guard<std::mutex> lock(wakeup.mutex);
++            observed = wakeup.generation;
++        }
++        bool progress = false;
++        for (int r = ranks - 1; r >= 0; --r) {
++            if (std::any_of(waiting.begin(), waiting.end(), [r](const ggml_pipeline_queue::task & task) {
++                    return task.rank == static_cast<size_t>(r);
++                })) {
++                continue;
++            }
++            ggml_pipeline_queue::task t;
++            if (!queue.submit(r, t)) {
++                continue;
++            }
++            const size_t b = t.block - 1;
++            auto sched = plans[b];
++            std::vector<ggml_tensor *> sent;
++            if (r > 0) {
++                for (const auto & copy : edges[b * ranks + r - 1].copies) {
++                    ggml_backend_tensor_set_async(devices[r], copy.dst, ggml_backend_buffer_get_base(copy.host),
++                                                  0, ggml_nbytes(copy.dst));
++                    sent.push_back(copy.src);
++                }
++            }
++            const auto start = trace ? ggml_time_us() : 0;
++            status = ggml_backend_sched_compute_splits(sched, r, r + 1, &sent);
++            if (trace) {
++                GGML_LOG_INFO("pipeline submit: block=%zu rank=%d backend=%s start_us=%" PRId64 " end_us=%" PRId64 " staged=%zu\n",
++                              b, r, ggml_backend_name(devices[r]), start, ggml_time_us(), sent.size());
++            }
++            if (status != GGML_STATUS_SUCCESS) {
++                break;
++            }
++            queue.produced(t);
++            if (r + 1 < ranks && ggml_pipeline_stage_read(devices[r], edges[b * ranks + r], wakeup)) {
++                waiting.push_back(t);
++            } else {
++                queue.visible(t);
++                if (r + 1 == ranks) {
++                    // No caller-visible output is released until the backend fence below.
++                    queue.take_output(t.block, outputs);
++                    queue.release(t.block);
++                }
++            }
++            progress = true;
++        }
++        for (auto it = waiting.begin(); it != waiting.end();) {
++            auto & edge = edges[(it->block - 1) * ranks + it->rank];
++            bool ready;
++            {
++                std::lock_guard<std::mutex> lock(wakeup.mutex);
++                ready = edge.ready;
++            }
++            if (ready) {
++                edge.completed.get();
++                queue.visible(*it);
++                it = waiting.erase(it);
++                progress = true;
++            } else {
++                ++it;
++            }
++        }
++        if (!progress && !waiting.empty()) {
++            std::unique_lock<std::mutex> lock(wakeup.mutex);
++            wakeup.changed.wait(lock, [&] { return wakeup.generation != observed; });
++        }
++    }
++    return status;
++} catch (const std::bad_alloc &) {
++    return GGML_STATUS_ALLOC_FAILED;
++} catch (const std::system_error & e) {
++    GGML_LOG_ERROR("pipeline completion failed: %s\n", e.what());
++    return GGML_STATUS_FAILED;
++}
++
+ ggml_backend_sched_t ggml_backend_sched_new(
+         ggml_backend_t * backends,
+         ggml_backend_buffer_type_t * bufts,
+@@ -2484,7 +2821,7 @@ enum ggml_status ggml_backend_sched_graph_compute_async(ggml_backend_sched_t sch
+         }
+     }
+ 
+-    return ggml_backend_sched_compute_splits(sched);
++    return ggml_backend_sched_compute_splits(sched, 0, sched->n_splits);
+ }
+ 
+ void ggml_backend_sched_synchronize(ggml_backend_sched_t sched) {
+diff --git a/ggml/src/ggml-rpc/ggml-rpc.cpp b/ggml/src/ggml-rpc/ggml-rpc.cpp
+index e4a84cb..eaafcb5 100644
+--- a/ggml/src/ggml-rpc/ggml-rpc.cpp
++++ b/ggml/src/ggml-rpc/ggml-rpc.cpp
+@@ -4,6 +4,7 @@
+ #include "ggml-cpp.h"
+ #include "transport.h"
+ #include "log.h"
++#include "mask-rows.h"
+ 
+ #include <array>
+ #include <chrono>
+@@ -127,6 +128,7 @@ struct rpc_msg_hello_req {
+ 
+ // server feature flags in rpc_msg_hello_rsp::flags
+ enum rpc_dispatcher_flags : uint8_t {
++    RPC_DISPATCHER_FLAGS_MASK_ROWS = 1 << 1,
+     RPC_DISPATCHER_FLAGS_SEND_TENSOR_HASH = 1 << 0, // client should try SET_TENSOR_HASH before sending tensor data
+ };
+ 
+@@ -532,6 +534,7 @@ public:
+     bool start(const std::string & endpoint);
+     void work();
+ 
++    bool supports_mask_rows() const { return flags & RPC_DISPATCHER_FLAGS_MASK_ROWS; }
+     bool get_send_tensor_hash() const { return flags & RPC_DISPATCHER_FLAGS_SEND_TENSOR_HASH; }
+ 
+     ~rpc_dispatcher();
+@@ -1174,8 +1177,32 @@ static void ggml_backend_rpc_free(ggml_backend_t backend) {
+     delete backend;
+ }
+ 
++// A causal mask often consists of a zero prefix and negative infinity in each
++// row. Verify the actual bit pattern before replacing a row by its prefix length.
++static constexpr uint8_t rpc_mask_rows = 2;
++static constexpr size_t rpc_max_mask_bytes = 32 * 1024 * 1024;
++static bool rpc_send_mask_rows(ggml_backend_rpc_context * ctx, const ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
++    if (!ctx->dispatcher->supports_mask_rows() || offset || size < 65536 || size > rpc_max_mask_bytes ||
++        !strstr(tensor->name, "mask") || !ggml_is_contiguous(tensor) || tensor->ne[0] < 32 ||
++        (tensor->type != GGML_TYPE_F16 && tensor->type != GGML_TYPE_F32) || size != ggml_nbytes(tensor)) {
++        return false;
++    }
++    size_t cols = tensor->ne[0], rows = ggml_nrows(tensor);
++    std::vector<uint32_t> limits;
++    bool ok = tensor->type == GGML_TYPE_F16 ?
++        rpc_pack_mask<uint16_t>(data, rows, cols, 0xfc00u, limits) :
++        rpc_pack_mask<uint32_t>(data, rows, cols, 0xff800000u, limits);
++    if (!ok) { return false; }
++    size_t bytes;
++    auto msg = serialize_set_tensor(serialize_tensor(tensor), rpc_mask_rows, 0, limits.data(),
++                                    limits.size()*sizeof(uint32_t), bytes);
++    ctx->dispatcher->send_async(RPC_CMD_SET_TENSOR, msg, bytes);
++    return true;
++}
++
+ static void ggml_backend_rpc_set_tensor_async(ggml_backend_t backend, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+     ggml_backend_rpc_context * ctx = (ggml_backend_rpc_context *)backend->context;
++    if (rpc_send_mask_rows(ctx, tensor, data, offset, size)) { return; }
+     rpc_tensor rpc_tensor = serialize_tensor(tensor);
+     uint8_t cache_flag = 0;
+     LOG_DBG2("[%s] tensor: %s, offset: %zu, size: %s\n", __func__, rpc_log_format_tensor(tensor).c_str(), offset,
+@@ -1360,6 +1387,15 @@ ggml_backend_buffer_type_t ggml_backend_rpc_buffer_type(const char * endpoint, u
+     }
+     size_t alignment = get_alignment(dispatcher, device);
+     size_t max_size = get_max_size(dispatcher, device);
++    // Small UMA boards can run out of contiguous device memory on multi-GiB
++    // reservations. Keep individual tensors intact; bound groups at load time.
++    if (const char * cap = getenv("GGML_RPC_BUFFER_MAX_MIB")) {
++        char * end = nullptr;
++        auto mib = strtoull(cap, &end, 10);
++        if (end != cap && !*end && mib && mib <= SIZE_MAX / (1024*1024)) {
++            max_size = std::min(max_size, size_t(mib)*1024*1024);
++        }
++    }
+     ggml_backend_rpc_buffer_type_context * buft_ctx = new ggml_backend_rpc_buffer_type_context {
+         /* .endpoint  = */ endpoint,
+         /* .device    = */ device,
+@@ -1511,7 +1547,7 @@ void rpc_server::hello(rpc_msg_hello_rsp & response) {
+     response.major = RPC_PROTO_MAJOR_VERSION;
+     response.minor = RPC_PROTO_MINOR_VERSION;
+     response.patch = RPC_PROTO_PATCH_VERSION;
+-    response.flags = cache_dir ? RPC_DISPATCHER_FLAGS_SEND_TENSOR_HASH : 0;
++    response.flags = RPC_DISPATCHER_FLAGS_MASK_ROWS | (cache_dir ? RPC_DISPATCHER_FLAGS_SEND_TENSOR_HASH : 0);
+     LOG_DBG("[%s] version: %d.%d.%d\n", __func__, response.major, response.minor, response.patch);
+ }
+ 
+@@ -1753,7 +1789,7 @@ ggml_tensor * rpc_server::deserialize_tensor(struct ggml_context * ctx, const rp
+ 
+ 
+ bool rpc_server::set_tensor(socket_ptr sock, uint64_t input_size) {
+-    sync_all_backends();
++    // Receive into host scratch while the preceding graph runs. Fence before writing the device.
+     // serialization format: | rpc_tensor | cache_flag (1 byte) | offset (8 bytes) | data (size bytes) |
+     // only the header is read here, the data is streamed from the socket below
+     uint8_t  cache_flag;
+@@ -1766,7 +1802,8 @@ bool rpc_server::set_tensor(socket_ptr sock, uint64_t input_size) {
+     const rpc_tensor * in_tensor = (const rpc_tensor *)header;
+     memcpy(&cache_flag, header + sizeof(rpc_tensor), sizeof(cache_flag));
+     memcpy(&offset,     header + sizeof(rpc_tensor) + sizeof(cache_flag), sizeof(offset));
+-    const size_t size = input_size - header_size;
++    const size_t wire_size = input_size - header_size;
++    size_t size = wire_size;
+ 
+     struct ggml_init_params params {
+         /*.mem_size   =*/ ggml_tensor_overhead(),
+@@ -1797,6 +1834,36 @@ bool rpc_server::set_tensor(socket_ptr sock, uint64_t input_size) {
+         }
+     }
+ 
++    if (cache_flag == rpc_mask_rows) {
++        if (offset || (tensor->type != GGML_TYPE_F16 && tensor->type != GGML_TYPE_F32) ||
++            tensor->ne[0] < 32 || tensor->ne[0] > int64_t(rpc_max_mask_bytes) || !wire_size ||
++            wire_size % sizeof(uint32_t) || wire_size > rpc_max_mask_bytes / 16) {
++            return false;
++        }
++        size_t width = ggml_type_size(tensor->type), cols = tensor->ne[0], rows = wire_size / sizeof(uint32_t);
++        if (rows > rpc_max_mask_bytes / width / cols) { return false; }
++        size_t tensor_rows = 1;
++        for (int d = 1; d < GGML_MAX_DIMS; ++d) {
++            if (tensor->ne[d] < 1 || size_t(tensor->ne[d]) > rows / tensor_rows) { return false; }
++            tensor_rows *= size_t(tensor->ne[d]);
++        }
++        if (tensor_rows != rows || !ggml_is_contiguous(tensor)) { return false; }
++        size = rows * cols * width;
++        auto base = reinterpret_cast<uintptr_t>(ggml_backend_buffer_get_base(tensor->buffer));
++        size_t capacity = ggml_backend_buffer_get_size(tensor->buffer);
++        if (in_tensor->data < base || in_tensor->data - base > capacity ||
++            size > capacity - (in_tensor->data - base) || size != ggml_nbytes(tensor)) { return false; }
++        std::vector<uint32_t> limits(rows);
++        if (!sock->recv_data(limits.data(), wire_size)) { return false; }
++        set_tensor_buf.resize(size);
++        bool ok = width == 2 ? rpc_unpack_mask<uint16_t>(limits, cols, 0xfc00u, set_tensor_buf.data()) :
++                               rpc_unpack_mask<uint32_t>(limits, cols, 0xff800000u, set_tensor_buf.data());
++        if (!ok) { return false; }
++        sync_all_backends();
++        ggml_backend_tensor_set(tensor, set_tensor_buf.data(), 0, size);
++        return true;
++    }
++    if (cache_flag > 1) { return false; }
+     if (cache_dir && cache_flag) {
+         // the whole data is needed to compute the hash
+         std::vector<uint8_t> data(size);
+@@ -1811,6 +1878,7 @@ bool rpc_server::set_tensor(socket_ptr sock, uint64_t input_size) {
+         std::ofstream ofs(cache_file, std::ios::binary);
+         ofs.write((const char *)data.data(), size);
+         LOG_INFO("[%s] saved to '%s'\n", __func__, cache_file.string().c_str());
++        sync_all_backends();
+         ggml_backend_tensor_set(tensor, data.data(), offset, size);
+         return true;
+     }
+@@ -1825,6 +1893,7 @@ bool rpc_server::set_tensor(socket_ptr sock, uint64_t input_size) {
+         if (!sock->recv_data(set_tensor_buf.data(), n)) {
+             return false;
+         }
++        if (done == 0) { sync_all_backends(); }
+         ggml_backend_tensor_set(tensor, set_tensor_buf.data(), offset + done, n);
+         done += n;
+     }
+diff --git a/include/llama.h b/include/llama.h
+index 3b2baa3..dbaa57d 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -1115,6 +1115,9 @@ extern "C" {
+     LLAMA_API bool llama_get_causal_attn(const struct llama_context * ctx);
+ 
+     // Set abort callback
++    // 0 selects legacy scheduling, 2 through 8 enable bounded distributed prefill.
++    LLAMA_API bool llama_set_rpc_prefill_window(struct llama_context * ctx, uint32_t window);
++
+     LLAMA_API void llama_set_abort_callback(struct llama_context * ctx, ggml_abort_callback abort_callback, void * abort_callback_data);
+ 
+     // Wait until all computations are finished
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 969989a..8a8c4c1 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -1,4 +1,5 @@
+ #include "llama-context.h"
++#include "ggml-pipeline-scratch.h"
+ 
+ #include "ggml.h"
+ #include "llama-arch.h"
+@@ -805,6 +806,7 @@ void llama_context::sched_reserve() {
+ 
+     LLAMA_LOG_DEBUG("%s: max_nodes = %zu\n", __func__, max_nodes);
+ 
++    pipeline_arenas = {};
+     gf_res_prev_active = nullptr;
+ 
+     gf_res_reserve->set_max_nodes(max_nodes);
+@@ -1814,37 +1816,38 @@ bool llama_context::set_adapter_cvec(
+     return res;
+ }
+ 
+-llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, llm_graph_type gtype, llama_memory_context_i * mctx, ggml_status & ret) {
+-    if (mctx && !mctx->apply()) {
++llm_graph_result * llama_context::prepare_ubatch(const llama_ubatch & ubatch, llm_graph_type gtype,
++        llama_memory_context_i * mctx, ggml_status & ret, ggml_backend_sched_t plan,
++        llm_graph_result * res, llm_graph_result *& active, bool fence_reuse, bool apply_memory, bool require_host_inputs) {
++    if (apply_memory && mctx && !mctx->apply()) {
+         LLAMA_LOG_ERROR("%s: failed to apply memory context\n", __func__);
+         ret = GGML_STATUS_FAILED;
+         return nullptr;
+     }
+ 
+-    auto * res = get_gf_res_prev();
+     auto * gf  = res->get_gf();
+ 
+     // the new graph parameters
+     // in order to correctly reuse a graph, it's full topology has to be uniquely determined by these parameters
+-    const auto gparams = graph_params(res, ubatch, mctx, gtype);
++    const auto gparams = graph_params(res, ubatch, mctx, gtype, plan);
+ 
+-    if (!graph_reuse_disable && gf_res_prev_active == res && res->can_reuse(gparams)) {
++    if (!graph_reuse_disable && active == res && res->can_reuse(gparams)) {
+         //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
+ 
+         // with pipeline parallelism, the previous graph_compute_async may still be running
+         // on the GPU. we must synchronize before set_inputs to avoid overwriting input tensors
+         // that the previous compute is still reading.
+-        if (cparams.pipeline_parallel) {
+-            ggml_backend_sched_synchronize(sched.get());
++        if (fence_reuse) {
++            ggml_backend_sched_synchronize(plan);
+         }
+ 
+         n_reused++;
+     } else {
+-        gf_res_prev_active = nullptr;
++        active = nullptr;
+         res->reset();
+ 
+-        ggml_backend_sched_reset(sched.get());
+-        ggml_backend_sched_set_eval_callback(sched.get(), cparams.cb_eval, cparams.cb_eval_user_data);
++        ggml_backend_sched_reset(plan);
++        ggml_backend_sched_set_eval_callback(plan, cparams.cb_eval, cparams.cb_eval_user_data);
+ 
+         //const auto t_start_us = ggml_time_us();
+ 
+@@ -1858,13 +1861,19 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
+             return nullptr;
+         }
+ 
+-        if (!ggml_backend_sched_alloc_graph(sched.get(), gf)) {
++        if (!ggml_backend_sched_alloc_graph(plan, gf)) {
+             LLAMA_LOG_ERROR("%s: failed to allocate graph\n", __func__);
+             ret = GGML_STATUS_ALLOC_FAILED;
+             return nullptr;
+         }
+ 
+-        gf_res_prev_active = res;
++        active = res;
++    }
++
++    if (require_host_inputs && !ggml_backend_sched_pipeline_inputs_on_host(gf)) {
++        // Do not set_inputs into accelerator scratch reserved for another block.
++        ret = GGML_STATUS_ALLOC_FAILED;
++        return nullptr;
+     }
+ 
+     // set the input data for the input tensors
+@@ -1877,6 +1886,16 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
+         //LLAMA_LOG_INFO("graph set inputs time: %.3f ms\n", (ggml_time_us() - t_start_us)/1000.0);
+     }
+ 
++    ret = GGML_STATUS_SUCCESS;
++    return res;
++}
++
++llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, llm_graph_type gtype, llama_memory_context_i * mctx, ggml_status & ret) {
++    auto * res = prepare_ubatch(ubatch, gtype, mctx, ret, sched.get(),
++                                get_gf_res_prev(), gf_res_prev_active, cparams.pipeline_parallel);
++    if (!res) {
++        return nullptr;
++    }
+     const auto status = graph_compute(res->get_gf(), ubatch.n_tokens > 1);
+     if (status != GGML_STATUS_SUCCESS) {
+         LLAMA_LOG_ERROR("%s: failed to compute graph, compute status: %d\n", __func__, status);
+@@ -2343,6 +2362,32 @@ int llama_context::decode(const llama_batch_ext & batch_inp) {
+         ggml_backend_event_wait(h_nextn_backend, ev_h_nextn_read.get());
+     }
+ 
++    // Explicit tensor placement disables legacy copy rotation. Rank queues can still
++    // use a single-copy plan: each block owns its graph and host inputs, and the
++    // executor checks the actual split topology before overlapping any devices.
++    bool pipeline = rpc_prefill_window && model.split_mode() == LLAMA_SPLIT_MODE_LAYER &&
++        model.n_gpu_layers() > model.hparams.n_layer_all && cparams.offload_kqv && cparams.n_seq_max == 1 &&
++        cparams.ctx_type == LLAMA_CONTEXT_TYPE_DEFAULT && cparams.causal_attn && !cparams.training &&
++        n_tokens_all > cparams.n_ubatch && n_outputs_all <= 1 && !has_samplers && !cparams.cb_eval &&
++        !cparams.embeddings && !cparams.embeddings_nextn && !layer_inp_dev && !write_h_nextn &&
++        !cparams.ctx_other && !cparams.ctx_state_src && !moe_cache && !batch_inp.n_embd &&
++        std::none_of(cparams.embeddings_layer_inp.begin(), cparams.embeddings_layer_inp.end(), [](bool v) { return v; });
++    const auto & first_block = mctx->get_ubatch();
++    const llama_seq_id seq = pipeline && first_block.n_seqs_unq == 1 && first_block.seq_id_unq ? first_block.seq_id_unq[0] : -1;
++    if (pipeline) {
++        pipeline = seq >= 0 && memory->seq_pos_max(seq) < 0 &&
++            std::all_of(batch_inp.tokens.begin(), batch_inp.tokens.end(), [seq](const llama_batch_ext::token & tok) {
++                return !tok.has_embd && tok.embd_row < 0 && tok.state_row < 0 &&
++                       (tok.seq_ids.empty() || (tok.seq_ids.size() == 1 && tok.seq_ids.count(seq)));
++            });
++    }
++    if (rpc_prefill_window && n_tokens_all > cparams.n_ubatch && getenv("GGML_PIPELINE_TRACE")) {
++        LLAMA_LOG_INFO("pipeline admission: enabled=%d tokens=%u window=%u pp=%d samplers=%d seq=%d\n",
++                       (int) pipeline, n_tokens_all, rpc_prefill_window, (int) cparams.pipeline_parallel, (int) has_samplers, seq);
++    }
++    const bool fresh_pipeline_sequence = pipeline;
++    std::array<ggml_backend_sched_t, 8> window = {};
++    size_t pending = 0;
+     do {
+         const auto & ubatch = mctx->get_ubatch();
+ 
+@@ -2364,9 +2409,67 @@ int llama_context::decode(const llama_batch_ext & batch_inp) {
+ 
+         ggml_status status;
+ 
+-        const auto * res = process_ubatch(ubatch, ctx_type_to_graph_type(cparams.ctx_type), mctx.get(), status);
++        const auto gtype = ctx_type_to_graph_type(cparams.ctx_type);
++        llm_graph_result * res = nullptr;
++        const bool defer = pipeline && pending + 1 < rpc_prefill_window && !n_outputs &&
++                           n_tokens_prev + ubatch.n_tokens < n_tokens_all;
++        if (defer || pending) {
++            ggml_backend_sched_t plan = sched.get();
++            if (defer) {
++                auto & slot = pipeline_arenas[pending];
++                if (!slot.sched) {
++                    slot.sched.reset(ggml_backend_sched_new(backend_ptrs.data(), backend_buft.data(), backend_ptrs.size(),
++                                                           graph_max_nodes(), cparams.pipeline_parallel, cparams.op_offload));
++                    if (rpc_prefill_window > 3) {
++                        ggml_backend_sched_share_pipeline_scratch(slot.sched.get(), sched.get());
++                    }
++                    ggml_backend_sched_set_copy_callback(slot.sched.get(), sched_copy_experts, this);
++                    slot.result = std::make_unique<llm_graph_result>(graph_max_nodes());
++                }
++                plan = slot.sched.get();
++                res = prepare_ubatch(ubatch, gtype, mctx.get(), status, plan, slot.result.get(), slot.active, false, true, rpc_prefill_window > 3);
++            } else {
++                res = prepare_ubatch(ubatch, gtype, mctx.get(), status, plan, get_gf_res_prev(),
++                                     gf_res_prev_active, cparams.pipeline_parallel, true, rpc_prefill_window > 3);
++            }
++            if (res) {
++                window[pending++] = plan;
++                if (defer) {
++                    n_tokens_prev += ubatch.n_tokens;
++                    continue;
++                }
++                graph_set_threads(true);
++                status = ggml_backend_sched_graph_compute_window(window.data(), pending);
++                if (status != GGML_STATUS_SUCCESS) {
++                    res = nullptr;
++                }
++            } else if (status == GGML_STATUS_ALLOC_FAILED) {
++                // apply() already reserved this block. Run earlier reservations before retrying
++                // in the original arena without applying the recurrent memory context twice.
++                LLAMA_LOG_WARN("%s: prefill window %u cannot prepare private inputs or reserve arena %zu, continuing with the legacy scheduler\n",
++                               __func__, rpc_prefill_window, pending + 1);
++                graph_set_threads(true);
++                status = pending ? ggml_backend_sched_graph_compute_window(window.data(), pending) : GGML_STATUS_SUCCESS;
++                pipeline_arenas = {};
++                pipeline = false;
++                if (status == GGML_STATUS_SUCCESS) {
++                    res = prepare_ubatch(ubatch, gtype, mctx.get(), status, sched.get(), get_gf_res_prev(),
++                                         gf_res_prev_active, cparams.pipeline_parallel, false);
++                    if (res && (status = graph_compute(res->get_gf(), true)) != GGML_STATUS_SUCCESS) {
++                        res = nullptr;
++                    }
++                }
++            }
++            pending = 0;
++        } else {
++            res = process_ubatch(ubatch, gtype, mctx.get(), status);
++        }
+ 
+         if (!res) {
++            if (fresh_pipeline_sequence) {
++                ggml_backend_sched_synchronize(sched.get());
++                memory->seq_rm(seq, -1, -1);
++            }
+             // the last ubatch failed or was aborted -> remove all positions of that ubatch from the memory module
+             llama_pos pos_min[LLAMA_MAX_SEQ];
+             for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
+@@ -3079,14 +3182,17 @@ llm_graph_params llama_context::graph_params(
+                         llm_graph_result * res,
+                       const llama_ubatch & ubatch,
+             const llama_memory_context_i * mctx,
+-                          llm_graph_type   gtype) const {
++                          llm_graph_type   gtype, ggml_backend_sched_t plan) const {
++    if (!plan) {
++        plan = sched.get();
++    }
+     return {
+         /*.model       =*/ &model,
+         /*.hparams     =*/ model.hparams,
+         /*.cparams     =*/ cparams,
+         /*.ubatch      =*/ ubatch,
+         /*.gtype       =*/ gtype,
+-        /*.sched       =*/ sched.get(),
++        /*.sched       =*/ plan,
+         /*.backend_cpu =*/ backend_cpu,
+         /*.cvec        =*/ cvec.get(),
+         /*.loras       =*/ loras.get(),
+@@ -3101,7 +3207,7 @@ llm_graph_params llama_context::graph_params(
+         /*.h_nextn_src   =*/ supports_state_row() ? cparams.ctx_state_src->get_h_nextn_dev() : nullptr,
+         /*.samplers    =*/ sampling.samplers,
+         /*.n_outputs   =*/ n_outputs,
+-        /*.cb          =*/ graph_get_cb(),
++        /*.cb          =*/ graph_get_cb(plan),
+         /*.res         =*/ res,
+     };
+ }
+@@ -3125,9 +3231,7 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph
+             lctx->n_reallocs_same, lctx->n_reallocs_diff);
+ }
+ 
+-ggml_status llama_context::graph_compute(
+-            ggml_cgraph * gf,
+-                   bool   batched) {
++void llama_context::graph_set_threads(bool batched) {
+     int n_threads        = batched ? cparams.n_threads_batch : cparams.n_threads;
+     ggml_threadpool_t tp = batched ? threadpool_batch        : threadpool;
+ 
+@@ -3145,7 +3249,12 @@ ggml_status llama_context::graph_compute(
+     }
+ 
+     copy_experts.reset();
++}
+ 
++ggml_status llama_context::graph_compute(
++            ggml_cgraph * gf,
++                   bool   batched) {
++    graph_set_threads(batched);
+     auto status = ggml_backend_sched_graph_compute_async(sched.get(), gf);
+     if (status != GGML_STATUS_SUCCESS) {
+         LLAMA_LOG_ERROR("%s: ggml_backend_sched_graph_compute_async failed with error %d\n", __func__, status);
+@@ -3240,8 +3349,8 @@ bool llama_context::sched_copy_experts(ggml_backend_t backend, const ggml_tensor
+     return true;
+ }
+ 
+-llm_graph_cb llama_context::graph_get_cb() const {
+-    return [&](const llama_ubatch & ubatch, ggml_tensor * cur, const char * name, int il) {
++llm_graph_cb llama_context::graph_get_cb(ggml_backend_sched_t plan) const {
++    return [this, plan](const llama_ubatch & ubatch, ggml_tensor * cur, const char * name, int il) {
+         if (il >= 0) {
+             ggml_format_name(cur, "%s-%d", name, il);
+         } else {
+@@ -3258,7 +3367,7 @@ llm_graph_cb llama_context::graph_get_cb() const {
+                 for (const auto & backend : backends) {
+                     if (ggml_backend_get_device(backend.get()) == dev_layer) {
+                         if (ggml_backend_supports_op(backend.get(), cur)) {
+-                            ggml_backend_sched_set_tensor_backend(sched.get(), cur, backend.get());
++                            ggml_backend_sched_set_tensor_backend(plan, cur, backend.get());
+                         }
+                     }
+                 }
+@@ -4664,6 +4773,39 @@ int32_t llama_n_threads_batch(llama_context * ctx) {
+     return ctx->n_threads_batch();
+ }
+ 
++bool llama_context::set_rpc_prefill_window(uint32_t window) {
++    if (window != 0 && (window < 2 || window > 8)) {
++        return false;
++    }
++    if (window) {
++        const bool rpc = std::any_of(backend_ptrs.begin(), backend_ptrs.end(), [](ggml_backend_t backend) {
++            return strncmp(ggml_backend_name(backend), "RPC", 3) == 0;
++        });
++        const bool cuda = std::any_of(backend_ptrs.begin(), backend_ptrs.end(), [](ggml_backend_t backend) {
++            return strncmp(ggml_backend_name(backend), "CUDA", 4) == 0;
++        });
++        const bool events = std::all_of(backend_ptrs.begin(), backend_ptrs.end(), [](ggml_backend_t backend) {
++            auto dev = ggml_backend_get_device(backend);
++            if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU) { return true; }
++            ggml_backend_dev_props props;
++            ggml_backend_dev_get_props(dev, &props);
++            return props.caps.async && props.caps.events;
++        });
++        if (!rpc || !cuda || !events) {
++            window = 0;
++        }
++    }
++    if (rpc_prefill_window != window) {
++        pipeline_arenas = {};
++        rpc_prefill_window = window;
++    }
++    return true;
++}
++
++bool llama_set_rpc_prefill_window(llama_context * ctx, uint32_t window) {
++    return ctx && ctx->set_rpc_prefill_window(window);
++}
++
+ void llama_set_abort_callback(llama_context * ctx, bool (*abort_callback)(void * data), void * abort_callback_data) {
+     ctx->set_abort_callback(abort_callback, abort_callback_data);
+ }
+diff --git a/src/llama-context.h b/src/llama-context.h
+index 3e3921c..025fc48 100644
+--- a/src/llama-context.h
++++ b/src/llama-context.h
+@@ -160,6 +160,8 @@ struct llama_context {
+             llama_memory_context_i * mctx,
+                        ggml_status & ret);
+ 
++    bool set_rpc_prefill_window(uint32_t window);
++
+     int encode(const llama_batch_ext & batch_inp);
+     int decode(const llama_batch_ext & batch_inp);
+ 
+@@ -286,15 +288,25 @@ public:
+     bool set_sampler(llama_seq_id seq_id, llama_sampler * sampler);
+ 
+ private:
++    struct pipeline_arena {
++        ggml_backend_sched_ptr sched;
++        llm_graph_result_ptr result;
++        llm_graph_result * active = nullptr;
++    };
++
++    llm_graph_result * prepare_ubatch(const llama_ubatch & ubatch, llm_graph_type gtype,
++            llama_memory_context_i * mctx, ggml_status & ret, ggml_backend_sched_t plan,
++            llm_graph_result * res, llm_graph_result *& active, bool fence_reuse, bool apply_memory = true, bool require_host_inputs = false);
++    void graph_set_threads(bool batched);
+     llm_graph_result * get_gf_res_prev();
+ 
+     llm_graph_params graph_params(
+                         llm_graph_result * res,
+                       const llama_ubatch & ubatch,
+             const llama_memory_context_i * mctx,
+-                          llm_graph_type   gtype) const;
++                          llm_graph_type   gtype, ggml_backend_sched_t plan = nullptr) const;
+ 
+-    llm_graph_cb graph_get_cb() const;
++    llm_graph_cb graph_get_cb(ggml_backend_sched_t plan) const;
+ 
+     // parameters defining the backend scheduler instance
+     struct sched_params {
+@@ -509,5 +521,8 @@ private:
+     mutable int32_t n_p_eval = 0; // number of tokens in eval calls for the prompt (with batch size > 1)
+     mutable int32_t n_eval   = 0; // number of eval calls
+ 
++    uint32_t rpc_prefill_window = 0;
++    std::array<pipeline_arena, 7> pipeline_arenas;
++
+     mutable int32_t n_reused = 0; // number of times the previous graph was reused
+ };
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 36e48a0..f25018a 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -386,6 +386,7 @@ if (APPLE)
+ endif()
+ 
+ if (NOT GGML_BACKEND_DL AND GGML_CPU)
++    llama_build_and_test(test-rpc-prefill-pipeline.cpp LABEL behavior LINK ggml ggml-cpu)
+     # these tests use the backends directly and cannot be built with dynamic loading
+     llama_build_and_test(test-barrier.cpp  LABEL "main behavior"  LINK ggml)
+     llama_build_and_test(test-quantize-fns.cpp  LABEL "main behavior"  LINK ggml)
+diff --git a/ggml/include/ggml-pipeline-scratch.h b/ggml/include/ggml-pipeline-scratch.h
+new file mode 100644
+index 0000000..a468273
+--- /dev/null
++++ b/ggml/include/ggml-pipeline-scratch.h
+@@ -0,0 +1,13 @@
++#pragma once
++#include "ggml-backend.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++// Windows with private host inputs may reuse accelerator scratch in per-device FIFO order.
++GGML_API void ggml_backend_sched_share_pipeline_scratch(ggml_backend_sched_t dst, ggml_backend_sched_t src);
++GGML_API bool ggml_backend_sched_pipeline_inputs_on_host(const struct ggml_cgraph * graph);
++void ggml_gallocr_share_buffer(ggml_gallocr_t dst, ggml_gallocr_t src, int i);
++#ifdef __cplusplus
++}
++#endif
+diff --git a/ggml/src/ggml-pipeline.h b/ggml/src/ggml-pipeline.h
+new file mode 100644
+index 0000000..bea1db2
+--- /dev/null
++++ b/ggml/src/ggml-pipeline.h
+@@ -0,0 +1,137 @@
++#pragma once
++
++#include <algorithm>
++#include <cstdint>
++#include <deque>
++#include <cstddef>
++#include <utility>
++#include <vector>
++
++// Single-owner control state. Device completion and boundary visibility are reported separately.
++class ggml_pipeline_queue {
++public:
++    struct output_row {
++        uint64_t request;  // includes the service slot generation
++        uint32_t row;
++    };
++    struct task {
++        uint64_t block;
++        size_t rank;
++    };
++    enum class admission { accepted, duplicate, full, unsupported };
++    struct budget { size_t blocks, tokens; };
++
++    ggml_pipeline_queue(size_t ranks, size_t window, size_t token_limit)
++        : ready(ranks), window(window), token_limit(token_limit) {}
++
++    budget capacity() const { return {window - blocks.size(), token_limit - tokens}; }
++    bool drained() const { return blocks.empty(); }
++
++    // Block IDs are positive and strictly increasing within a scheduling session.
++    admission try_admit(uint64_t id, size_t count, std::vector<output_row> outputs = {}) {
++        if (!id || !count || count > token_limit || ready.empty()) {
++            return admission::unsupported;
++        }
++        if (id <= last_id) {
++            return admission::duplicate;
++        }
++        if (blocks.size() == window || count > capacity().tokens) {
++            return admission::full;
++        }
++        blocks.push_back({id, count, 0, state::ready, std::move(outputs)});
++        ready.front().push_back(id);
++        last_id = id;
++        tokens += count;
++        return admission::accepted;
++    }
++
++    bool submit(size_t rank, task & result) {
++        if (rank >= ready.size() || ready[rank].empty()) {
++            return false;
++        }
++        const uint64_t id = ready[rank].front();
++        // A late transfer of an older block must not reorder recurrent updates on this rank.
++        for (const auto & earlier : blocks) {
++            if (earlier.id >= id) {
++                break;
++            }
++            if (earlier.rank < rank || (earlier.rank == rank && earlier.phase == state::ready)) {
++                return false;
++            }
++        }
++        auto it = find(id);
++        ready[rank].pop_front();
++        it->phase = state::submitted;
++        result = {id, rank};
++        return true;
++    }
++
++    bool produced(task t) {
++        auto it = find(t.block);
++        if (it == blocks.end() || it->rank != t.rank || it->phase != state::submitted) {
++            return false;
++        }
++        it->phase = state::transferring;
++        return true;
++    }
++
++    // The executor may also signal when visibility is ordered on the consumer stream.
++    bool visible(task t) {
++        auto it = find(t.block);
++        if (it == blocks.end() || it->rank != t.rank || it->phase != state::transferring) {
++            return false;
++        }
++        if (++it->rank == ready.size()) {
++            it->phase = state::output;
++        } else {
++            it->phase = state::ready;
++            auto & queue = ready[it->rank];
++            queue.insert(std::upper_bound(queue.begin(), queue.end(), t.block), t.block);
++        }
++        return true;
++    }
++
++    void cancel(uint64_t request) {
++        for (auto & b : blocks) {
++            auto & rows = b.outputs;
++            rows.erase(std::remove_if(rows.begin(), rows.end(), [=](const output_row & r) {
++                return r.request == request;
++            }), rows.end());
++        }
++    }
++    bool take_output(uint64_t id, std::vector<output_row> & result) {
++        auto it = find(id);
++        if (it == blocks.end() || it->phase != state::output) {
++            return false;
++        }
++        result = std::move(it->outputs);
++        it->phase = state::held;
++        return true;
++    }
++    bool release(uint64_t id) {
++        auto it = find(id);
++        if (it == blocks.end() || it->phase != state::held) {
++            return false;
++        }
++        tokens -= it->tokens;
++        blocks.erase(it);
++        return true;
++    }
++
++private:
++    enum class state { ready, submitted, transferring, output, held };
++    struct block {
++        uint64_t id;
++        size_t tokens, rank;
++        state phase;
++        std::vector<output_row> outputs;
++    };
++    std::deque<block>::iterator find(uint64_t id) {
++        return std::find_if(blocks.begin(), blocks.end(), [=](const block & b) { return b.id == id; });
++    }
++    std::vector<std::deque<uint64_t>> ready;
++    std::deque<block> blocks;
++    size_t window, token_limit;
++    uint64_t last_id = 0;
++    size_t tokens = 0;
++};
+diff --git a/ggml/src/ggml-rpc/mask-rows.h b/ggml/src/ggml-rpc/mask-rows.h
+new file mode 100644
+index 0000000..d187ae9
+--- /dev/null
++++ b/ggml/src/ggml-rpc/mask-rows.h
+@@ -0,0 +1,38 @@
++#pragma once
++#include <cstdint>
++#include <cstring>
++#include <vector>
++
++template<typename T>
++static bool rpc_pack_mask(const void * data, size_t rows, size_t cols, T neg_inf, std::vector<uint32_t> & limits) {
++    auto * p = static_cast<const uint8_t *>(data);
++    limits.reserve(rows);
++    for (size_t r = 0; r < rows; ++r) {
++        size_t i = 0;
++        T value;
++        for (; i < cols; ++i) {
++            memcpy(&value, p + i*sizeof(T), sizeof(T));
++            if (value != 0) { break; }
++        }
++        limits.push_back(static_cast<uint32_t>(i));
++        for (; i < cols; ++i) {
++            memcpy(&value, p + i*sizeof(T), sizeof(T));
++            if (value != neg_inf) { return false; }
++        }
++        p += cols*sizeof(T);
++    }
++    return true;
++}
++
++template<typename T>
++static bool rpc_unpack_mask(const std::vector<uint32_t> & limits, size_t cols, T neg_inf, uint8_t * out) {
++    for (auto prefix : limits) {
++        if (prefix > cols) { return false; }
++        memset(out, 0, prefix * sizeof(T));
++        for (size_t j = prefix; j < cols; ++j) {
++            memcpy(out + j*sizeof(T), &neg_inf, sizeof(T));
++        }
++        out += cols*sizeof(T);
++    }
++    return true;
++}
+diff --git a/tests/test-rpc-prefill-pipeline.cpp b/tests/test-rpc-prefill-pipeline.cpp
+new file mode 100644
+index 0000000..ba00628
+--- /dev/null
++++ b/tests/test-rpc-prefill-pipeline.cpp
+@@ -0,0 +1,136 @@
++#include "../ggml/src/ggml-pipeline.h"
++#include "../ggml/src/ggml-rpc/mask-rows.h"
++#include "../ggml/src/ggml-backend-impl.h"
++#include "ggml.h"
++#include "ggml-backend.h"
++#include "ggml-cpu.h"
++
++#include <array>
++#include <cstdio>
++#include <cstdlib>
++
++#define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #x); std::abort(); } } while (false)
++
++template<typename T>
++static void test_mask_rows(T neg_inf) {
++    const std::array<T, 9> mask = {neg_inf, neg_inf, neg_inf, 0, neg_inf, neg_inf, 0, 0, 0};
++    std::vector<uint32_t> limits;
++    CHECK(rpc_pack_mask(mask.data(), 3, 3, neg_inf, limits));
++    CHECK((limits == std::vector<uint32_t>{0, 1, 3}));
++    std::array<T, 9> restored;
++    CHECK(rpc_unpack_mask(limits, 3, neg_inf, reinterpret_cast<uint8_t *>(restored.data())));
++    CHECK(mask == restored);
++    limits[1] = 4;
++    CHECK(!rpc_unpack_mask(limits, 3, neg_inf, reinterpret_cast<uint8_t *>(restored.data())));
++    restored = mask;
++    restored[1] = 0;
++    limits.clear();
++    CHECK(!rpc_pack_mask(restored.data(), 3, 3, neg_inf, limits));
++}
++
++static void test_queue() {
++    ggml_pipeline_queue q(3, 2, 128);
++    using result = ggml_pipeline_queue::admission;
++    using task = ggml_pipeline_queue::task;
++    CHECK(q.try_admit(0, 80) == result::unsupported);
++    CHECK(q.try_admit(1, 129) == result::unsupported);
++    CHECK(q.try_admit(1, 80, {{10, 1}, {20, 3}}) == result::accepted);
++    CHECK(q.try_admit(2, 64) == result::full);
++    CHECK(q.try_admit(1, 80) == result::duplicate);
++    CHECK(q.try_admit(2, 48, {{21, 4}}) == result::accepted);
++    CHECK(q.capacity().blocks == 0 && q.capacity().tokens == 0);
++    task a, b;
++    CHECK(q.submit(0, a) && a.block == 1);
++    CHECK(q.submit(0, b) && b.block == 2);
++    CHECK(!q.submit(1, a));
++    CHECK(!q.drained());
++    // The second network read completes first.
++    CHECK(q.produced(b) && q.visible(b));
++    CHECK(!q.submit(1, b));
++    CHECK(q.produced(a) && q.visible(a));
++    CHECK(!q.visible(a));
++    q.cancel(10);
++    for (size_t r = 1; r < 3; ++r) {
++        CHECK(q.submit(r, a) && a.block == 1);
++        CHECK(q.submit(r, b) && b.block == 2);
++        CHECK(q.produced(a) && q.visible(a));
++        CHECK(q.produced(b) && q.visible(b));
++    }
++    std::vector<ggml_pipeline_queue::output_row> rows;
++    CHECK(q.take_output(1, rows) && rows.size() == 1 && rows[0].request == 20 && rows[0].row == 3);
++    CHECK(!q.take_output(1, rows) && !q.drained());
++    CHECK(q.release(1));
++    CHECK(q.try_admit(3, 80) == result::accepted);
++    CHECK(!q.produced(a) && !q.visible(a));
++    CHECK(q.take_output(2, rows) && rows.size() == 1 && rows.front().request == 21);
++    CHECK(q.release(2));
++    for (size_t r = 0; r < 3; ++r) {
++        CHECK(q.submit(r, a) && a.block == 3);
++        CHECK(q.produced(a) && q.visible(a));
++    }
++    CHECK(q.take_output(3, rows) && q.release(3) && q.drained());
++}
++
++static void test_graphs(size_t count) {
++    std::array<ggml_backend_t, 3> backends;
++    for (auto & backend : backends) {
++        backend = ggml_backend_cpu_init();
++        ggml_backend_cpu_set_n_threads(backend, 1);
++    }
++    // Distinct host buffer types keep the scheduler's priority pass from folding all
++    // three CPU instances into one split. The kernels still run on real ggml tensors.
++    std::array<ggml_backend_buffer_type, 3> types;
++    std::array<ggml_backend_buffer_type_t, 3> bufts;
++    for (size_t r = 0; r < backends.size(); ++r) {
++        types[r] = *ggml_backend_cpu_buffer_type();
++        bufts[r] = &types[r];
++    }
++    std::vector<ggml_context *> ctx(count);
++    std::vector<ggml_backend_sched_t> plans(count);
++    std::vector<ggml_tensor *> out(count);
++    for (size_t b = 0; b < count; ++b) {
++        ctx[b] = ggml_init({1024*1024, nullptr, true});
++        plans[b] = ggml_backend_sched_new(backends.data(), bufts.data(), 3, 64, false, true);
++        auto input = ggml_new_tensor_1d(ctx[b], GGML_TYPE_F32, 5);
++        ggml_set_input(input);
++        auto x = input;
++        for (auto backend : backends) {
++            x = ggml_scale(ctx[b], x, 2.0f);
++            ggml_backend_sched_set_tensor_backend(plans[b], x, backend);
++        }
++        out[b] = x;
++        ggml_set_output(x);
++        auto graph = ggml_new_graph_custom(ctx[b], 64, false);
++        ggml_build_forward_expand(graph, x);
++        CHECK(ggml_backend_sched_alloc_graph(plans[b], graph));
++        CHECK(ggml_backend_sched_get_n_splits(plans[b]) == 3);
++        float values[5];
++        for (size_t i = 0; i < 5; ++i) { values[i] = float(10*b+i); }
++        ggml_backend_tensor_set(input, values, 0, sizeof(values));
++    }
++    ggml_backend_sched_t duplicate[2] = {plans[0], plans[0]};
++    CHECK(ggml_backend_sched_graph_compute_window(duplicate, 2) == GGML_STATUS_FAILED);
++    CHECK(ggml_backend_sched_graph_compute_window(nullptr, count) == GGML_STATUS_FAILED);
++    CHECK(ggml_backend_sched_graph_compute_window(plans.data(), count) == GGML_STATUS_SUCCESS);
++    for (size_t b = 0; b < count; ++b) {
++        float values[5];
++        ggml_backend_tensor_get(out[b], values, 0, sizeof(values));
++        for (size_t i = 0; i < 5; ++i) { CHECK(values[i] == 8*float(10*b+i)); }
++        ggml_backend_sched_free(plans[b]);
++        ggml_free(ctx[b]);
++    }
++    for (auto backend : backends) {
++        ggml_backend_free(backend);
++    }
++}
++
++int main() {
++    test_mask_rows<uint16_t>(0xfc00u);
++    test_mask_rows<uint32_t>(0xff800000u);
++    test_queue();
++    test_graphs(2);
++    test_graphs(3);
++    test_graphs(5);
++    test_graphs(8);
++    std::puts("queue ordering, backpressure, cancellation, late events and bounded multi-block ggml graphs passed");
++}
