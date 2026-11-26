@@ -14,6 +14,8 @@
 
 三个版本的底座提交均为 `9214bdb554544c35e4a9e2c2e8b75d8cfee330ab`；准确的完整提交、配置及历史测试数据见各版本 `manifest.json`。运行平台为 **Linux aarch64 / Jetson Orin Nano SM87 / CUDA 13.2**（v1、v2 另标注 L4T R39.2.1），不作为其他 CPU / CUDA / JetPack 平台的通用发布包。
 
+v3 相对上游基线的修改及作用见 [myllama_v3 改进说明](V3_IMPROVEMENTS.md)。
+
 机器可读的版本、资产 URL、大小和 SHA256 见 [catalog.json](catalog.json)。测速数字是原发布目录中的历史记录，此次导入没有重跑推理性能测试。
 
 ## 目录和分发
